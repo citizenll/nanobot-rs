@@ -123,6 +123,7 @@ impl ContextBuilder {
         messages: &mut Vec<Value>,
         content: Option<&str>,
         tool_calls: Option<Vec<Value>>,
+        reasoning_content: Option<&str>,
     ) {
         let mut msg = json!({
             "role": "assistant",
@@ -130,6 +131,11 @@ impl ContextBuilder {
         });
         if let Some(calls) = tool_calls {
             msg["tool_calls"] = Value::Array(calls);
+        }
+        if let Some(reasoning) = reasoning_content {
+            if !reasoning.is_empty() {
+                msg["reasoning_content"] = Value::String(reasoning.to_string());
+            }
         }
         messages.push(msg);
     }

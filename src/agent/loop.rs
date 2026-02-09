@@ -25,7 +25,7 @@ pub struct AgentLoop {
     model: String,
     max_iterations: u32,
     context: ContextBuilder,
-    sessions: SessionManager,
+    sessions: Arc<SessionManager>,
     tools: ToolRegistry,
     message_tool: Arc<MessageTool>,
     spawn_tool: Arc<SpawnTool>,
@@ -45,9 +45,10 @@ impl AgentLoop {
         exec_timeout_s: u64,
         restrict_to_workspace: bool,
         cron_service: Option<Arc<CronService>>,
+        session_manager: Option<Arc<SessionManager>>,
     ) -> Result<Self> {
         let context = ContextBuilder::new(workspace.clone())?;
-        let sessions = SessionManager::new()?;
+        let sessions = session_manager.unwrap_or(Arc::new(SessionManager::new()?));
         let mut tools = ToolRegistry::new();
         let model_name = model.unwrap_or_else(|| provider.default_model().to_string());
 
@@ -189,6 +190,7 @@ impl AgentLoop {
                     &mut messages,
                     response.content.as_deref(),
                     Some(tool_call_dicts),
+                    response.reasoning_content.as_deref(),
                 );
 
                 for tool_call in response.tool_calls {
@@ -272,6 +274,7 @@ impl AgentLoop {
                     &mut messages,
                     response.content.as_deref(),
                     Some(tool_call_dicts),
+                    response.reasoning_content.as_deref(),
                 );
 
                 for tool_call in response.tool_calls {

@@ -88,6 +88,11 @@ impl Channel for WhatsAppChannel {
                 let msg_type = data.get("type").and_then(Value::as_str).unwrap_or_default();
                 match msg_type {
                     "message" => {
+                        let pn = data
+                            .get("pn")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string();
                         let sender = data
                             .get("sender")
                             .and_then(Value::as_str)
@@ -98,11 +103,8 @@ impl Channel for WhatsAppChannel {
                             .and_then(Value::as_str)
                             .unwrap_or_default()
                             .to_string();
-                        let chat_id = sender
-                            .split('@')
-                            .next()
-                            .unwrap_or(sender.as_str())
-                            .to_string();
+                        let user_id = if pn.is_empty() { &sender } else { &pn };
+                        let sender_id = user_id.split('@').next().unwrap_or(user_id).to_string();
                         if content == "[Voice Message]" {
                             content =
                                 "[Voice Message: Transcription not available for WhatsApp yet]"
@@ -117,11 +119,12 @@ impl Channel for WhatsAppChannel {
                             "timestamp".to_string(),
                             data.get("timestamp").cloned().unwrap_or(Value::Null),
                         );
+                        metadata.insert("pn".to_string(), Value::String(pn));
                         metadata.insert(
                             "is_group".to_string(),
                             data.get("isGroup").cloned().unwrap_or(Value::Bool(false)),
                         );
-                        self.handle_message(chat_id.clone(), sender, content, Vec::new(), metadata)
+                        self.handle_message(sender_id, sender, content, Vec::new(), metadata)
                             .await?;
                     }
                     "status" => {

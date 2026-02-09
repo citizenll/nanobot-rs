@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = []
 feishu-websocket = ["dep:open-lark"]
+dingtalk-stream = ["dep:dingtalk-stream-sdk-rust"]
 
 [dependencies]
 anyhow = "1.0"
@@ -13,6 +14,7 @@ async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde", "clock"] }
 clap = { version = "4.5", features = ["derive"] }
 cron = "0.15"
+dingtalk-stream-sdk-rust = { version = "0.1.0", optional = true }
 dirs = "6.0"
 futures-util = "0.3"
 html-escape = "0.2"

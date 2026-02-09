@@ -15,6 +15,7 @@ pub struct LLMResponse {
     pub tool_calls: Vec<ToolCallRequest>,
     pub finish_reason: String,
     pub usage: Map<String, Value>,
+    pub reasoning_content: Option<String>,
 }
 
 impl LLMResponse {

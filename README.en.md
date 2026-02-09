@@ -22,6 +22,7 @@
   - Discord (Gateway + REST, with typing indicator)
   - WhatsApp (Node bridge)
   - Feishu (REST send; optional WebSocket receive feature)
+  - DingTalk (optional Stream receive feature)
 - Built-in skills synced from the original project (`skills/*`)
 
 ## Requirements
@@ -49,11 +50,33 @@ Edit `~/.nanobot/config.json`:
   "providers": {
     "openai": {
       "apiKey": "sk-xxx"
+    },
+    "openrouter": {
+      "apiKey": "sk-or-xxx",
+      "extraHeaders": {
+        "HTTP-Referer": "https://example.com",
+        "X-Title": "nanobot-rs"
+      }
     }
   },
   "agents": {
     "defaults": {
       "model": "gpt-4o-mini"
+    }
+  }
+}
+```
+
+If you use DingTalk, add this under `channels`:
+
+```json
+{
+  "channels": {
+    "dingtalk": {
+      "enabled": true,
+      "clientId": "dingxxx",
+      "clientSecret": "secretxxx",
+      "allowFrom": []
     }
   }
 }
@@ -101,6 +124,14 @@ Default build supports Feishu sending. To enable Feishu WebSocket receive:
 cargo run --features feishu-websocket -- gateway
 ```
 
+## DingTalk Stream Receive
+
+Default builds do not include DingTalk Stream. Enable it with:
+
+```bash
+cargo run --features dingtalk-stream -- gateway
+```
+
 ## WhatsApp Login
 
 `channels login` will automatically:
@@ -116,6 +147,7 @@ cargo run --features feishu-websocket -- gateway
 cargo fmt
 cargo test
 cargo check --features feishu-websocket
+cargo check --features dingtalk-stream
 ```
 
 ## License

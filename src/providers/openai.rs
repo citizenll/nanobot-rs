@@ -3,12 +3,14 @@ use anyhow::Context;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct OpenAIProvider {
     api_key: String,
     api_base: String,
     default_model: String,
+    extra_headers: HashMap<String, String>,
     client: Client,
 }
 
@@ -17,11 +19,13 @@ impl OpenAIProvider {
         api_key: impl Into<String>,
         api_base: Option<String>,
         default_model: impl Into<String>,
+        extra_headers: Option<HashMap<String, String>>,
     ) -> Self {
         Self {
             api_key: api_key.into(),
             api_base: api_base.unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
             default_model: default_model.into(),
+            extra_headers: extra_headers.unwrap_or_default(),
             client: Client::new(),
         }
     }
@@ -51,11 +55,11 @@ impl LLMProvider for OpenAIProvider {
         }
 
         let url = format!("{}/chat/completions", self.api_base.trim_end_matches('/'));
-        let response = self
-            .client
-            .post(url)
-            .bearer_auth(&self.api_key)
-            .json(&body)
+        let mut req = self.client.post(url).bearer_auth(&self.api_key).json(&body);
+        for (k, v) in &self.extra_headers {
+            req = req.header(k, v);
+        }
+        let response = req
             .send()
             .await
             .context("failed to call OpenAI-compatible endpoint")?;
@@ -72,6 +76,7 @@ impl LLMProvider for OpenAIProvider {
                 tool_calls: Vec::new(),
                 finish_reason: "error".to_string(),
                 usage: Map::new(),
+                reasoning_content: None,
             });
         }
 
@@ -85,6 +90,10 @@ impl LLMProvider for OpenAIProvider {
         let message = choice.get("message").cloned().unwrap_or_else(|| json!({}));
         let content = message
             .get("content")
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned);
+        let reasoning_content = message
+            .get("reasoning_content")
             .and_then(Value::as_str)
             .map(ToOwned::to_owned);
 
@@ -132,6 +141,7 @@ impl LLMProvider for OpenAIProvider {
             tool_calls,
             finish_reason,
             usage,
+            reasoning_content,
         })
     }
 

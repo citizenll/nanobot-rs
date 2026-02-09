@@ -2,16 +2,19 @@ use crate::bus::{MessageBus, OutboundMessage};
 use crate::channels::base::Channel;
 use crate::config::TelegramConfig;
 use crate::providers::transcription::GroqTranscriptionProvider;
+use crate::session::SessionManager;
 use anyhow::Result;
 use async_trait::async_trait;
 use html_escape::encode_text;
 use regex::Regex;
-use reqwest::Client;
+use reqwest::{Client, Proxy};
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 fn markdown_to_telegram_html(text: &str) -> String {
     if text.is_empty() {
@@ -85,6 +88,8 @@ pub struct TelegramChannel {
     client: Client,
     offset: Mutex<i64>,
     groq_api_key: String,
+    session_manager: Option<Arc<SessionManager>>,
+    typing_tasks: Mutex<HashMap<String, JoinHandle<()>>>,
 }
 
 #[cfg(test)]
@@ -111,14 +116,29 @@ mod tests {
 }
 
 impl TelegramChannel {
-    pub fn new(config: TelegramConfig, bus: Arc<MessageBus>, groq_api_key: String) -> Self {
+    pub fn new(
+        config: TelegramConfig,
+        bus: Arc<MessageBus>,
+        groq_api_key: String,
+        session_manager: Option<Arc<SessionManager>>,
+    ) -> Self {
+        let client = if let Some(proxy_url) = &config.proxy {
+            match Proxy::all(proxy_url).and_then(|proxy| Client::builder().proxy(proxy).build()) {
+                Ok(client) => client,
+                Err(_) => Client::new(),
+            }
+        } else {
+            Client::new()
+        };
         Self {
             config,
             bus,
             running: AtomicBool::new(false),
-            client: Client::new(),
+            client,
             offset: Mutex::new(0),
             groq_api_key,
+            session_manager,
+            typing_tasks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -192,6 +212,36 @@ impl TelegramChannel {
             .await;
     }
 
+    async fn start_typing(&self, chat_id: &str) {
+        self.stop_typing(chat_id).await;
+        let api_url = self.api_url("sendChatAction");
+        let chat_id_owned = chat_id.to_string();
+        let client = self.client.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let _ = client
+                    .post(&api_url)
+                    .json(&json!({
+                        "chat_id": chat_id_owned,
+                        "action": "typing"
+                    }))
+                    .send()
+                    .await;
+                tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+            }
+        });
+        self.typing_tasks
+            .lock()
+            .await
+            .insert(chat_id.to_string(), task);
+    }
+
+    async fn stop_typing(&self, chat_id: &str) {
+        if let Some(task) = self.typing_tasks.lock().await.remove(chat_id) {
+            task.abort();
+        }
+    }
+
     fn get_extension(&self, media_type: &str, mime_type: Option<&str>) -> &'static str {
         if let Some(mime_type) = mime_type {
             match mime_type {
@@ -244,19 +294,57 @@ impl TelegramChannel {
         let mut media_paths = Vec::new();
         if let Some(text) = message.get("text").and_then(Value::as_str) {
             if text.starts_with('/') {
-                if text.trim_start().starts_with("/start") {
-                    let first_name = user
-                        .get("first_name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("there");
-                    self.send_text_message(
-                        &chat_id,
-                        &format!(
-                            "Hi {first_name}! I'm nanobot.\n\nSend me a message and I'll respond!"
-                        ),
-                        None,
-                    )
-                    .await;
+                let command = text
+                    .trim_start_matches('/')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .split('@')
+                    .next()
+                    .unwrap_or("");
+                match command {
+                    "start" => {
+                        let first_name = user
+                            .get("first_name")
+                            .and_then(Value::as_str)
+                            .unwrap_or("there");
+                        self.send_text_message(
+                            &chat_id,
+                            &format!(
+                                "Hi {first_name}! I'm nanobot.\n\nSend me a message and I'll respond!\nType /help to see available commands."
+                            ),
+                            None,
+                        )
+                        .await;
+                    }
+                    "help" => {
+                        self.send_text_message(
+                            &chat_id,
+                            "nanobot commands:\n/start - Start the bot\n/reset - Reset conversation history\n/help - Show this help message",
+                            None,
+                        )
+                        .await;
+                    }
+                    "reset" => {
+                        if let Some(session_manager) = &self.session_manager {
+                            let session_key = format!("{}:{}", self.name(), chat_id);
+                            let _ = session_manager.delete(&session_key);
+                            self.send_text_message(
+                                &chat_id,
+                                "Conversation history cleared. Let's start fresh!",
+                                None,
+                            )
+                            .await;
+                        } else {
+                            self.send_text_message(
+                                &chat_id,
+                                "Session management is not available.",
+                                None,
+                            )
+                            .await;
+                        }
+                    }
+                    _ => {}
                 }
                 return Ok(());
             }
@@ -361,6 +449,8 @@ impl TelegramChannel {
             ),
         );
 
+        self.start_typing(&chat_id).await;
+
         self.handle_message(
             sender_id,
             chat_id,
@@ -437,10 +527,15 @@ impl Channel for TelegramChannel {
 
     async fn stop(&self) -> Result<()> {
         self.running.store(false, Ordering::Relaxed);
+        let mut typing_tasks = self.typing_tasks.lock().await;
+        for (_, task) in typing_tasks.drain() {
+            task.abort();
+        }
         Ok(())
     }
 
     async fn send(&self, msg: &OutboundMessage) -> Result<()> {
+        self.stop_typing(&msg.chat_id).await;
         let html = markdown_to_telegram_html(&msg.content);
         let first_try = self
             .client

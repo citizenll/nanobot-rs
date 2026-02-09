@@ -3,6 +3,7 @@ use crate::channels::base::Channel;
 use crate::config::FeishuConfig;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
+use regex::Regex;
 use reqwest::Client;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -82,6 +83,90 @@ impl FeishuChannel {
             .to_string();
         *self.tenant_access_token.lock().await = Some(token.clone());
         Ok(token)
+    }
+
+    fn parse_md_table(table_text: &str) -> Option<Value> {
+        let lines = table_text
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>();
+        if lines.len() < 3 {
+            return None;
+        }
+        let split_row = |line: &str| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|c| c.trim().to_string())
+                .collect::<Vec<_>>()
+        };
+        let headers = split_row(lines[0]);
+        let rows = lines
+            .iter()
+            .skip(2)
+            .map(|line| split_row(line))
+            .collect::<Vec<_>>();
+        let columns = headers
+            .iter()
+            .enumerate()
+            .map(|(i, header)| {
+                json!({
+                    "tag": "column",
+                    "name": format!("c{i}"),
+                    "display_name": header,
+                    "width": "auto"
+                })
+            })
+            .collect::<Vec<_>>();
+        let row_values = rows
+            .iter()
+            .map(|row| {
+                let mut map = serde_json::Map::new();
+                for (i, _) in headers.iter().enumerate() {
+                    map.insert(
+                        format!("c{i}"),
+                        Value::String(row.get(i).cloned().unwrap_or_default()),
+                    );
+                }
+                Value::Object(map)
+            })
+            .collect::<Vec<_>>();
+        Some(json!({
+            "tag": "table",
+            "page_size": row_values.len() + 1,
+            "columns": columns,
+            "rows": row_values,
+        }))
+    }
+
+    fn build_card_elements(&self, content: &str) -> Vec<Value> {
+        let table_re = Regex::new(
+            r"(?m)((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)",
+        )
+        .expect("valid feishu table regex");
+        let mut elements = Vec::new();
+        let mut last_end = 0usize;
+        for m in table_re.find_iter(content) {
+            let before = content[last_end..m.start()].trim();
+            if !before.is_empty() {
+                elements.push(json!({"tag":"markdown","content": before}));
+            }
+            let raw_table = m.as_str();
+            if let Some(parsed) = Self::parse_md_table(raw_table) {
+                elements.push(parsed);
+            } else {
+                elements.push(json!({"tag":"markdown","content": raw_table}));
+            }
+            last_end = m.end();
+        }
+        let remaining = content[last_end..].trim();
+        if !remaining.is_empty() {
+            elements.push(json!({"tag":"markdown","content": remaining}));
+        }
+        if elements.is_empty() {
+            elements.push(json!({"tag":"markdown","content": content}));
+        }
+        elements
     }
 
     #[cfg(feature = "feishu-websocket")]
@@ -290,14 +375,19 @@ impl Channel for FeishuChannel {
         let url = format!(
             "https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={receive_id_type}"
         );
+        let elements = self.build_card_elements(&msg.content);
+        let card = json!({
+            "config": {"wide_screen_mode": true},
+            "elements": elements,
+        });
         let resp = self
             .http
             .post(url)
             .bearer_auth(token)
             .json(&json!({
                 "receive_id": msg.chat_id,
-                "msg_type": "text",
-                "content": json!({"text": msg.content}).to_string(),
+                "msg_type": "interactive",
+                "content": card.to_string(),
             }))
             .send()
             .await?;

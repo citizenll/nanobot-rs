@@ -1,4 +1,5 @@
 pub mod base;
+pub mod dingtalk;
 pub mod discord;
 pub mod feishu;
 pub mod manager;

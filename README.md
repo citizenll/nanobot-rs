@@ -22,6 +22,7 @@ English: [README.en.md](README.en.md)
   - Discord（Gateway + REST，支持 typing 指示）
   - WhatsApp（Node bridge）
   - Feishu（REST 发送；WebSocket 接收可选特性）
+  - DingTalk（Stream 接收可选特性）
 - 内置 skills：同步原项目 `skills/*`
 
 ## 环境要求
@@ -49,11 +50,33 @@ cargo run -- onboard
   "providers": {
     "openai": {
       "apiKey": "sk-xxx"
+    },
+    "openrouter": {
+      "apiKey": "sk-or-xxx",
+      "extraHeaders": {
+        "HTTP-Referer": "https://example.com",
+        "X-Title": "nanobot-rs"
+      }
     }
   },
   "agents": {
     "defaults": {
       "model": "gpt-4o-mini"
+    }
+  }
+}
+```
+
+如需使用钉钉，还可在 `channels` 中增加：
+
+```json
+{
+  "channels": {
+    "dingtalk": {
+      "enabled": true,
+      "clientId": "dingxxx",
+      "clientSecret": "secretxxx",
+      "allowFrom": []
     }
   }
 }
@@ -101,6 +124,14 @@ cargo run -- cron remove <job_id>
 cargo run --features feishu-websocket -- gateway
 ```
 
+## DingTalk Stream 接收
+
+默认构建不启用钉钉 Stream。要启用钉钉接收：
+
+```bash
+cargo run --features dingtalk-stream -- gateway
+```
+
 ## WhatsApp 登录
 
 `channels login` 会自动：
@@ -116,6 +147,7 @@ cargo run --features feishu-websocket -- gateway
 cargo fmt
 cargo test
 cargo check --features feishu-websocket
+cargo check --features dingtalk-stream
 ```
 
 ## License

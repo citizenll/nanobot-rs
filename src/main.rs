@@ -8,6 +8,7 @@ use nanobot_rs::config::{Config, get_config_path, load_config, providers_status,
 use nanobot_rs::cron::{CronSchedule, CronService};
 use nanobot_rs::heartbeat::{DEFAULT_HEARTBEAT_INTERVAL_S, HeartbeatService};
 use nanobot_rs::providers::openai::OpenAIProvider;
+use nanobot_rs::session::SessionManager;
 use nanobot_rs::utils::{get_data_path, get_workspace_path};
 use std::fs;
 use std::io::BufRead;
@@ -272,7 +273,11 @@ async fn cmd_gateway(port: u16, _verbose: bool) -> Result<()> {
         api_key.unwrap_or_else(|| "dummy".to_string()),
         config.get_api_base(Some(&model)),
         model.clone(),
+        config
+            .get_provider(Some(&model))
+            .and_then(|p| p.extra_headers.clone()),
     ));
+    let session_manager = Arc::new(SessionManager::new()?);
 
     let cron_store_path = get_data_path()?.join("cron").join("jobs.json");
     let cron = Arc::new(CronService::new(cron_store_path));
@@ -291,6 +296,7 @@ async fn cmd_gateway(port: u16, _verbose: bool) -> Result<()> {
         config.tools.exec.timeout,
         config.tools.restrict_to_workspace,
         Some(cron.clone()),
+        Some(session_manager.clone()),
     )?);
 
     let bus_for_cron = bus.clone();
@@ -341,7 +347,11 @@ async fn cmd_gateway(port: u16, _verbose: bool) -> Result<()> {
         .await;
     heartbeat.start().await;
 
-    let channels = Arc::new(ChannelManager::new(&config, bus.clone()));
+    let channels = Arc::new(ChannelManager::new(
+        &config,
+        bus.clone(),
+        Some(session_manager),
+    ));
     let enabled_channels = channels.enabled_channels();
     if enabled_channels.is_empty() {
         println!("Warning: No channels enabled");
@@ -390,6 +400,9 @@ async fn cmd_agent(message: Option<String>, session: &str) -> Result<()> {
         api_key.unwrap_or_else(|| "dummy".to_string()),
         config.get_api_base(Some(&model)),
         model.clone(),
+        config
+            .get_provider(Some(&model))
+            .and_then(|p| p.extra_headers.clone()),
     ));
     let agent_loop = AgentLoop::new(
         bus,
@@ -404,6 +417,7 @@ async fn cmd_agent(message: Option<String>, session: &str) -> Result<()> {
         },
         config.tools.exec.timeout,
         config.tools.restrict_to_workspace,
+        None,
         None,
     )?;
 
@@ -488,6 +502,21 @@ async fn cmd_channels(command: ChannelCommand) -> Result<()> {
                     "disabled"
                 },
                 fs_app
+            );
+            let dt_client = if config.channels.dingtalk.client_id.is_empty() {
+                "not configured".to_string()
+            } else {
+                let prefix: String = config.channels.dingtalk.client_id.chars().take(8).collect();
+                format!("{prefix}...")
+            };
+            println!(
+                "DingTalk: {} (client_id={})",
+                if config.channels.dingtalk.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                dt_client
             );
         }
         ChannelCommand::Login => {

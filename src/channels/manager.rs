@@ -1,10 +1,12 @@
 use crate::bus::MessageBus;
 use crate::channels::base::Channel;
+use crate::channels::dingtalk::DingTalkChannel;
 use crate::channels::discord::DiscordChannel;
 use crate::channels::feishu::FeishuChannel;
 use crate::channels::telegram::TelegramChannel;
 use crate::channels::whatsapp::WhatsAppChannel;
 use crate::config::Config;
+use crate::session::SessionManager;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,7 +21,11 @@ pub struct ChannelManager {
 }
 
 impl ChannelManager {
-    pub fn new(config: &Config, bus: Arc<MessageBus>) -> Self {
+    pub fn new(
+        config: &Config,
+        bus: Arc<MessageBus>,
+        session_manager: Option<Arc<SessionManager>>,
+    ) -> Self {
         let mut channels: HashMap<String, Arc<dyn Channel>> = HashMap::new();
 
         if config.channels.telegram.enabled {
@@ -29,6 +35,7 @@ impl ChannelManager {
                     config.channels.telegram.clone(),
                     bus.clone(),
                     config.providers.groq.api_key.clone(),
+                    session_manager.clone(),
                 )),
             );
         }
@@ -55,6 +62,15 @@ impl ChannelManager {
                 "feishu".to_string(),
                 Arc::new(FeishuChannel::new(
                     config.channels.feishu.clone(),
+                    bus.clone(),
+                )),
+            );
+        }
+        if config.channels.dingtalk.enabled {
+            channels.insert(
+                "dingtalk".to_string(),
+                Arc::new(DingTalkChannel::new(
+                    config.channels.dingtalk.clone(),
                     bus.clone(),
                 )),
             );

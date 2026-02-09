@@ -2,6 +2,7 @@ use crate::utils::{expand_tilde, get_data_path};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -9,6 +10,7 @@ use std::path::{Path, PathBuf};
 pub struct ProviderConfig {
     pub api_key: String,
     pub api_base: Option<String>,
+    pub extra_headers: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,9 +19,11 @@ pub struct ProvidersConfig {
     pub anthropic: ProviderConfig,
     pub openai: ProviderConfig,
     pub openrouter: ProviderConfig,
+    pub aihubmix: ProviderConfig,
     pub deepseek: ProviderConfig,
     pub groq: ProviderConfig,
     pub zhipu: ProviderConfig,
+    pub dashscope: ProviderConfig,
     pub vllm: ProviderConfig,
     pub gemini: ProviderConfig,
     pub moonshot: ProviderConfig,
@@ -31,9 +35,11 @@ impl Default for ProvidersConfig {
             anthropic: ProviderConfig::default(),
             openai: ProviderConfig::default(),
             openrouter: ProviderConfig::default(),
+            aihubmix: ProviderConfig::default(),
             deepseek: ProviderConfig::default(),
             groq: ProviderConfig::default(),
             zhipu: ProviderConfig::default(),
+            dashscope: ProviderConfig::default(),
             vllm: ProviderConfig::default(),
             gemini: ProviderConfig::default(),
             moonshot: ProviderConfig::default(),
@@ -189,11 +195,21 @@ pub struct FeishuConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
+pub struct DingTalkConfig {
+    pub enabled: bool,
+    pub client_id: String,
+    pub client_secret: String,
+    pub allow_from: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct ChannelsConfig {
     pub whatsapp: WhatsAppConfig,
     pub telegram: TelegramConfig,
     pub discord: DiscordConfig,
     pub feishu: FeishuConfig,
+    pub dingtalk: DingTalkConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -211,73 +227,111 @@ impl Config {
         expand_tilde(&self.agents.defaults.workspace)
     }
 
-    fn match_provider(&self, model: Option<&str>) -> Option<&ProviderConfig> {
+    fn match_provider(
+        &self,
+        model: Option<&str>,
+    ) -> (Option<&ProviderConfig>, Option<&'static str>) {
         let m = model.unwrap_or(&self.agents.defaults.model).to_lowercase();
-        let mapping: [(&str, &ProviderConfig); 14] = [
-            ("openrouter", &self.providers.openrouter),
-            ("deepseek", &self.providers.deepseek),
-            ("anthropic", &self.providers.anthropic),
-            ("claude", &self.providers.anthropic),
-            ("openai", &self.providers.openai),
-            ("gpt", &self.providers.openai),
-            ("gemini", &self.providers.gemini),
-            ("zhipu", &self.providers.zhipu),
-            ("glm", &self.providers.zhipu),
-            ("zai", &self.providers.zhipu),
-            ("groq", &self.providers.groq),
-            ("moonshot", &self.providers.moonshot),
-            ("kimi", &self.providers.moonshot),
-            ("vllm", &self.providers.vllm),
+        let mapping: [(&str, &[&str]); 11] = [
+            ("openrouter", &["openrouter"]),
+            ("aihubmix", &["aihubmix"]),
+            ("anthropic", &["anthropic", "claude"]),
+            ("openai", &["openai", "gpt"]),
+            ("deepseek", &["deepseek"]),
+            ("gemini", &["gemini"]),
+            ("zhipu", &["zhipu", "glm", "zai"]),
+            ("dashscope", &["qwen", "dashscope"]),
+            ("moonshot", &["moonshot", "kimi"]),
+            ("vllm", &["vllm"]),
+            ("groq", &["groq"]),
         ];
 
-        for (keyword, provider) in mapping {
-            if m.contains(keyword) && !provider.api_key.is_empty() {
-                return Some(provider);
+        for (name, keywords) in mapping {
+            let provider = self.provider_by_name(name);
+            if keywords.iter().any(|kw| m.contains(kw)) && !provider.api_key.is_empty() {
+                return (Some(provider), Some(name));
             }
         }
-        None
+
+        for name in [
+            "openrouter",
+            "aihubmix",
+            "anthropic",
+            "openai",
+            "deepseek",
+            "gemini",
+            "zhipu",
+            "dashscope",
+            "moonshot",
+            "vllm",
+            "groq",
+        ] {
+            let provider = self.provider_by_name(name);
+            if !provider.api_key.is_empty() {
+                return (Some(provider), Some(name));
+            }
+        }
+        (None, None)
+    }
+
+    fn provider_by_name(&self, name: &str) -> &ProviderConfig {
+        match name {
+            "openrouter" => &self.providers.openrouter,
+            "aihubmix" => &self.providers.aihubmix,
+            "anthropic" => &self.providers.anthropic,
+            "openai" => &self.providers.openai,
+            "deepseek" => &self.providers.deepseek,
+            "gemini" => &self.providers.gemini,
+            "zhipu" => &self.providers.zhipu,
+            "dashscope" => &self.providers.dashscope,
+            "moonshot" => &self.providers.moonshot,
+            "vllm" => &self.providers.vllm,
+            "groq" => &self.providers.groq,
+            _ => &self.providers.openai,
+        }
+    }
+
+    pub fn get_provider(&self, model: Option<&str>) -> Option<&ProviderConfig> {
+        let (provider, _) = self.match_provider(model);
+        provider
+    }
+
+    pub fn get_provider_name(&self, model: Option<&str>) -> Option<String> {
+        let (_, name) = self.match_provider(model);
+        name.map(ToOwned::to_owned)
     }
 
     pub fn get_api_key(&self, model: Option<&str>) -> Option<String> {
-        if let Some(provider) = self.match_provider(model) {
+        if let Some(provider) = self.get_provider(model) {
             return Some(provider.api_key.clone());
-        }
-        for provider in [
-            &self.providers.openrouter,
-            &self.providers.deepseek,
-            &self.providers.anthropic,
-            &self.providers.openai,
-            &self.providers.gemini,
-            &self.providers.zhipu,
-            &self.providers.moonshot,
-            &self.providers.vllm,
-            &self.providers.groq,
-        ] {
-            if !provider.api_key.is_empty() {
-                return Some(provider.api_key.clone());
-            }
         }
         None
     }
 
     pub fn get_api_base(&self, model: Option<&str>) -> Option<String> {
-        let m = model.unwrap_or(&self.agents.defaults.model).to_lowercase();
-        if m.contains("openrouter") {
-            return Some(
+        let (provider, name) = self.match_provider(model);
+        if let Some(provider) = provider {
+            if provider.api_base.is_some() {
+                return provider.api_base.clone();
+            }
+        }
+        match name {
+            Some("openrouter") => Some(
                 self.providers
                     .openrouter
                     .api_base
                     .clone()
                     .unwrap_or_else(|| "https://openrouter.ai/api/v1".to_string()),
-            );
+            ),
+            Some("aihubmix") => Some(
+                self.providers
+                    .aihubmix
+                    .api_base
+                    .clone()
+                    .unwrap_or_else(|| "https://aihubmix.com/v1".to_string()),
+            ),
+            _ => None,
         }
-        if m.contains("zhipu") || m.contains("glm") || m.contains("zai") {
-            return self.providers.zhipu.api_base.clone();
-        }
-        if m.contains("vllm") {
-            return self.providers.vllm.api_base.clone();
-        }
-        None
     }
 }
 
@@ -341,6 +395,10 @@ pub fn providers_status(config: &Config) -> Map<String, Value> {
         Value::Bool(!config.providers.openrouter.api_key.is_empty()),
     );
     map.insert(
+        "aihubmix".to_string(),
+        Value::Bool(!config.providers.aihubmix.api_key.is_empty()),
+    );
+    map.insert(
         "anthropic".to_string(),
         Value::Bool(!config.providers.anthropic.api_key.is_empty()),
     );
@@ -349,12 +407,32 @@ pub fn providers_status(config: &Config) -> Map<String, Value> {
         Value::Bool(!config.providers.openai.api_key.is_empty()),
     );
     map.insert(
+        "deepseek".to_string(),
+        Value::Bool(!config.providers.deepseek.api_key.is_empty()),
+    );
+    map.insert(
         "gemini".to_string(),
         Value::Bool(!config.providers.gemini.api_key.is_empty()),
     );
     map.insert(
+        "zhipu".to_string(),
+        Value::Bool(!config.providers.zhipu.api_key.is_empty()),
+    );
+    map.insert(
+        "dashscope".to_string(),
+        Value::Bool(!config.providers.dashscope.api_key.is_empty()),
+    );
+    map.insert(
+        "moonshot".to_string(),
+        Value::Bool(!config.providers.moonshot.api_key.is_empty()),
+    );
+    map.insert(
         "vllm".to_string(),
         Value::Bool(config.providers.vllm.api_base.is_some()),
+    );
+    map.insert(
+        "groq".to_string(),
+        Value::Bool(!config.providers.groq.api_key.is_empty()),
     );
     map
 }
