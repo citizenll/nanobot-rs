@@ -226,21 +226,30 @@ impl Tool for ExecTool {
 #[cfg(test)]
 mod tests {
     use super::ExecTool;
-    use std::path::Path;
+    use std::path::PathBuf;
+
+    fn test_cwd() -> PathBuf {
+        std::env::temp_dir().join("nanobot-rs-workspace")
+    }
 
     #[test]
     fn guard_allows_relative_posix_fragment() {
         let tool = ExecTool::new(10, None, None, None, true);
-        let cwd = Path::new("D:\\Dev\\self\\nanobot-rs");
-        let err = tool.guard_command(".venv/bin/python -V", cwd);
+        let cwd = test_cwd();
+        let err = tool.guard_command(".venv/bin/python -V", &cwd);
         assert!(err.is_none(), "unexpected guard error: {err:?}");
     }
 
     #[test]
     fn guard_blocks_absolute_path_outside_workspace() {
         let tool = ExecTool::new(10, None, None, None, true);
-        let cwd = Path::new("D:\\Dev\\self\\nanobot-rs");
-        let err = tool.guard_command("type C:\\Windows\\System32\\drivers\\etc\\hosts", cwd);
+        let cwd = test_cwd();
+        let cmd = if cfg!(target_os = "windows") {
+            "type C:\\Windows\\System32\\drivers\\etc\\hosts"
+        } else {
+            "cat /etc/hosts"
+        };
+        let err = tool.guard_command(cmd, &cwd);
         assert!(err.is_some(), "expected guard error");
     }
 }
