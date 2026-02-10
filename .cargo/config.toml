@@ -1,0 +1,3 @@
+[target.x86_64-pc-windows-msvc]
+# Avoid MSVC link.exe PDB instability (LNK1318) during package verify/publish.
+linker = "rust-lld"
