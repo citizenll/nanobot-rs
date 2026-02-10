@@ -165,6 +165,9 @@ fn cmd_onboard() -> Result<()> {
         println!("Created {}", memory_file.display());
     }
 
+    let skills_dir = workspace.join("skills");
+    std::fs::create_dir_all(&skills_dir)?;
+
     println!("nanobot-rs is ready.");
     println!("Next steps:");
     println!("1. Add your API key to {}", config_path.display());
