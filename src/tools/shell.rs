@@ -104,18 +104,19 @@ impl ExecTool {
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let posix_paths = Regex::new(r#"/[^\s\"']+"#)
+            let posix_paths = Regex::new(r#"(?:^|[\s|>])(/[^\s\"'>]+)"#)
                 .ok()
                 .map(|re| {
-                    re.find_iter(trimmed)
-                        .map(|m| m.as_str().to_string())
+                    re.captures_iter(trimmed)
+                        .filter_map(|cap| cap.get(1).map(|m| m.as_str().to_string()))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
 
             for raw in win_paths.into_iter().chain(posix_paths) {
-                let p = normalize_path(Path::new(&raw));
-                if !p.starts_with(&cwd) && p != cwd {
+                let candidate = Path::new(raw.trim());
+                let p = normalize_path(candidate);
+                if candidate.is_absolute() && !p.starts_with(&cwd) && p != cwd {
                     return Some(
                         "Error: Command blocked by safety guard (path outside working dir)"
                             .to_string(),
@@ -219,5 +220,27 @@ impl Tool for ExecTool {
             );
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExecTool;
+    use std::path::Path;
+
+    #[test]
+    fn guard_allows_relative_posix_fragment() {
+        let tool = ExecTool::new(10, None, None, None, true);
+        let cwd = Path::new("D:\\Dev\\self\\nanobot-rs");
+        let err = tool.guard_command(".venv/bin/python -V", cwd);
+        assert!(err.is_none(), "unexpected guard error: {err:?}");
+    }
+
+    #[test]
+    fn guard_blocks_absolute_path_outside_workspace() {
+        let tool = ExecTool::new(10, None, None, None, true);
+        let cwd = Path::new("D:\\Dev\\self\\nanobot-rs");
+        let err = tool.guard_command("type C:\\Windows\\System32\\drivers\\etc\\hosts", cwd);
+        assert!(err.is_some(), "expected guard error");
     }
 }

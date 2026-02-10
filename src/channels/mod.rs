@@ -4,6 +4,7 @@ pub mod discord;
 pub mod email;
 pub mod feishu;
 pub mod manager;
+pub mod mochat;
 pub mod qq;
 pub mod slack;
 pub mod telegram;

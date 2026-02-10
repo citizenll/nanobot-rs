@@ -4,6 +4,7 @@ use crate::channels::dingtalk::DingTalkChannel;
 use crate::channels::discord::DiscordChannel;
 use crate::channels::email::EmailChannel;
 use crate::channels::feishu::FeishuChannel;
+use crate::channels::mochat::MochatChannel;
 use crate::channels::qq::QQChannel;
 use crate::channels::slack::SlackChannel;
 use crate::channels::telegram::TelegramChannel;
@@ -65,6 +66,15 @@ impl ChannelManager {
                 "feishu".to_string(),
                 Arc::new(FeishuChannel::new(
                     config.channels.feishu.clone(),
+                    bus.clone(),
+                )),
+            );
+        }
+        if config.channels.mochat.enabled {
+            channels.insert(
+                "mochat".to_string(),
+                Arc::new(MochatChannel::new(
+                    config.channels.mochat.clone(),
                     bus.clone(),
                 )),
             );

@@ -516,6 +516,20 @@ async fn cmd_channels(command: ChannelCommand) -> Result<()> {
                 },
                 fs_app
             );
+            let mochat_base = if config.channels.mochat.claw_token.is_empty() {
+                "not configured".to_string()
+            } else {
+                config.channels.mochat.base_url.clone()
+            };
+            println!(
+                "Mochat: {} (base_url={})",
+                if config.channels.mochat.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                mochat_base
+            );
             let dt_client = if config.channels.dingtalk.client_id.is_empty() {
                 "not configured".to_string()
             } else {

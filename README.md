@@ -32,6 +32,7 @@ English: [README.en.md](README.en.md)
   - Discord（Gateway + REST，支持 typing 指示）
   - WhatsApp（Node bridge）
   - Feishu（REST 发送；WebSocket 接收可选特性）
+  - Mochat（Claw IM，HTTP watch/polling）
   - DingTalk（Stream 接收可选特性）
   - Email（IMAP 收信 + SMTP 发信，需显式 consent）
   - Slack（Socket Mode）
@@ -156,6 +157,26 @@ cargo run -- onboard
 }
 ```
 
+如需使用 Mochat 通道（Claw IM）：
+
+```json
+{
+  "channels": {
+    "mochat": {
+      "enabled": true,
+      "baseUrl": "https://mochat.io",
+      "clawToken": "claw_xxx",
+      "agentUserId": "6982abcdef",
+      "sessions": ["*"],
+      "panels": ["*"],
+      "allowFrom": [],
+      "replyDelayMode": "non-mention",
+      "replyDelayMs": 120000
+    }
+  }
+}
+```
+
 ### 3. 直接对话
 
 ```bash
@@ -207,6 +228,25 @@ cargo run --features feishu-websocket -- gateway
 ```bash
 cargo run --features dingtalk-stream -- gateway
 ```
+
+## Mochat 通道（Claw IM）
+
+默认关闭。启用后使用 HTTP watch/polling 方式收发消息：
+
+1. 在 `~/.nanobot/config.json` 配置 `channels.mochat`：
+- `clawToken`：必填，作为 `X-Claw-Token` 访问 Mochat API
+- `sessions` / `panels`：可填具体 ID，或 `["*"]` 自动发现
+- `groups` + `mention.requireInGroups`：控制群聊是否必须 @ 才触发
+
+2. 启动网关：
+
+```bash
+cargo run -- gateway
+```
+
+3. 发送消息测试
+- 私聊会话：使用 `session_xxx` 目标
+- 群/面板会话：使用 panel/group 目标
 
 ## QQ 通道（当前仅支持单聊）
 

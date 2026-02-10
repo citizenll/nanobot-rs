@@ -204,6 +204,90 @@ pub struct DingTalkConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+pub struct MochatMentionConfig {
+    pub require_in_groups: bool,
+}
+
+impl Default for MochatMentionConfig {
+    fn default() -> Self {
+        Self {
+            require_in_groups: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MochatGroupRule {
+    pub require_mention: bool,
+}
+
+impl Default for MochatGroupRule {
+    fn default() -> Self {
+        Self {
+            require_mention: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MochatConfig {
+    pub enabled: bool,
+    pub base_url: String,
+    pub socket_url: String,
+    pub socket_path: String,
+    pub socket_disable_msgpack: bool,
+    pub socket_reconnect_delay_ms: u64,
+    pub socket_max_reconnect_delay_ms: u64,
+    pub socket_connect_timeout_ms: u64,
+    pub refresh_interval_ms: u64,
+    pub watch_timeout_ms: u64,
+    pub watch_limit: usize,
+    pub retry_delay_ms: u64,
+    pub max_retry_attempts: usize,
+    pub claw_token: String,
+    pub agent_user_id: String,
+    pub sessions: Vec<String>,
+    pub panels: Vec<String>,
+    pub allow_from: Vec<String>,
+    pub mention: MochatMentionConfig,
+    pub groups: std::collections::HashMap<String, MochatGroupRule>,
+    pub reply_delay_mode: String,
+    pub reply_delay_ms: u64,
+}
+
+impl Default for MochatConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_url: "https://mochat.io".to_string(),
+            socket_url: String::new(),
+            socket_path: "/socket.io".to_string(),
+            socket_disable_msgpack: false,
+            socket_reconnect_delay_ms: 1000,
+            socket_max_reconnect_delay_ms: 10000,
+            socket_connect_timeout_ms: 10000,
+            refresh_interval_ms: 30000,
+            watch_timeout_ms: 25000,
+            watch_limit: 100,
+            retry_delay_ms: 500,
+            max_retry_attempts: 0,
+            claw_token: String::new(),
+            agent_user_id: String::new(),
+            sessions: Vec::new(),
+            panels: Vec::new(),
+            allow_from: Vec::new(),
+            mention: MochatMentionConfig::default(),
+            groups: std::collections::HashMap::new(),
+            reply_delay_mode: "non-mention".to_string(),
+            reply_delay_ms: 120000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct EmailConfig {
     pub enabled: bool,
     pub consent_granted: bool,
@@ -297,7 +381,7 @@ impl Default for SlackConfig {
             bot_token: String::new(),
             app_token: String::new(),
             user_token_read_only: true,
-            group_policy: "open".to_string(),
+            group_policy: "mention".to_string(),
             group_allow_from: Vec::new(),
             dm: SlackDMConfig::default(),
         }
@@ -320,6 +404,7 @@ pub struct ChannelsConfig {
     pub telegram: TelegramConfig,
     pub discord: DiscordConfig,
     pub feishu: FeishuConfig,
+    pub mochat: MochatConfig,
     pub dingtalk: DingTalkConfig,
     pub email: EmailConfig,
     pub slack: SlackConfig,

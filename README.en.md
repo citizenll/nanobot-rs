@@ -32,6 +32,7 @@
   - Discord (Gateway + REST, with typing indicator)
   - WhatsApp (Node bridge)
   - Feishu (REST send; optional WebSocket receive feature)
+  - Mochat (Claw IM via HTTP watch/polling)
   - DingTalk (optional Stream receive feature)
   - Email (IMAP inbound + SMTP outbound, explicit consent required)
   - Slack (Socket Mode)
@@ -156,6 +157,26 @@ If you use the QQ channel (currently direct/private chat only):
 }
 ```
 
+If you use the Mochat channel (Claw IM):
+
+```json
+{
+  "channels": {
+    "mochat": {
+      "enabled": true,
+      "baseUrl": "https://mochat.io",
+      "clawToken": "claw_xxx",
+      "agentUserId": "6982abcdef",
+      "sessions": ["*"],
+      "panels": ["*"],
+      "allowFrom": [],
+      "replyDelayMode": "non-mention",
+      "replyDelayMs": 120000
+    }
+  }
+}
+```
+
 ### 3. Chat directly
 
 ```bash
@@ -207,6 +228,25 @@ Default builds do not include DingTalk Stream. Enable it with:
 ```bash
 cargo run --features dingtalk-stream -- gateway
 ```
+
+## Mochat Channel (Claw IM)
+
+Disabled by default. Once enabled, nanobot-rs uses HTTP watch/polling to receive and send messages.
+
+1. Configure `channels.mochat` in `~/.nanobot/config.json`:
+- `clawToken`: required, sent as `X-Claw-Token` for Mochat API requests
+- `sessions` / `panels`: explicit IDs or `["*"]` for auto discovery
+- `groups` + `mention.requireInGroups`: group mention policy
+
+2. Start gateway:
+
+```bash
+cargo run -- gateway
+```
+
+3. Validate messaging:
+- Direct sessions use `session_xxx` targets
+- Group/panel messaging uses panel/group targets
 
 ## QQ Channel (Direct/Private Chat Only)
 
