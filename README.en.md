@@ -233,18 +233,47 @@ cargo run --features dingtalk-stream -- gateway
 
 Disabled by default. Once enabled, nanobot-rs uses HTTP watch/polling to receive and send messages.
 
-1. Configure `channels.mochat` in `~/.nanobot/config.json`:
+1. Optional: ask nanobot to set up Mochat automatically
+- In agent mode, send this prompt (replace the email with yours):
+
+```text
+Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
+```
+
+- nanobot will try to register and write Mochat settings into `~/.nanobot/config.json`.
+
+2. Manual setup (recommended to verify config)
+- Configure `channels.mochat` in `~/.nanobot/config.json`:
 - `clawToken`: required, sent as `X-Claw-Token` for Mochat API requests
 - `sessions` / `panels`: explicit IDs or `["*"]` for auto discovery
 - `groups` + `mention.requireInGroups`: group mention policy
 
-2. Start gateway:
+```json
+{
+  "channels": {
+    "mochat": {
+      "enabled": true,
+      "baseUrl": "https://mochat.io",
+      "socketUrl": "https://mochat.io",
+      "socketPath": "/socket.io",
+      "clawToken": "claw_xxx",
+      "agentUserId": "6982abcdef",
+      "sessions": ["*"],
+      "panels": ["*"],
+      "replyDelayMode": "non-mention",
+      "replyDelayMs": 120000
+    }
+  }
+}
+```
+
+3. Start gateway:
 
 ```bash
 cargo run -- gateway
 ```
 
-3. Validate messaging:
+4. Validate messaging:
 - Direct sessions use `session_xxx` targets
 - Group/panel messaging uses panel/group targets
 
@@ -272,6 +301,51 @@ cargo run --features qq-botrs -- gateway
 ```
 
 After startup, send a direct QQ message to the bot and it should reply.
+
+## Slack Channel
+
+Uses Socket Mode, so no public callback URL is required.
+
+1. Create a Slack app
+- Go to [Slack API](https://api.slack.com/apps) -> Create New App -> From scratch
+- Select a workspace and create the app
+
+2. Configure app capabilities
+- Socket Mode: enable it and create an App-Level Token (`connections:write`, starts with `xapp-...`)
+- OAuth & Permissions: add bot scopes `chat:write`, `reactions:write`, `app_mentions:read`
+- Event Subscriptions: enable and subscribe to `message.im`, `message.channels`, `app_mention`
+- App Home: enable Messages Tab and allow messaging from that tab
+- Install App: install to workspace and copy Bot Token (`xoxb-...`)
+
+3. Configure `~/.nanobot/config.json`
+
+```json
+{
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "mode": "socket",
+      "botToken": "xoxb-...",
+      "appToken": "xapp-...",
+      "groupPolicy": "mention",
+      "groupAllowFrom": [],
+      "dm": {
+        "enabled": true,
+        "policy": "open",
+        "allowFrom": []
+      }
+    }
+  }
+}
+```
+
+4. Start gateway
+
+```bash
+cargo run -- gateway
+```
+
+You can DM the bot directly, or @mention it in a channel.
 
 ## WhatsApp Login
 

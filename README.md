@@ -233,18 +233,47 @@ cargo run --features dingtalk-stream -- gateway
 
 默认关闭。启用后使用 HTTP watch/polling 方式收发消息：
 
-1. 在 `~/.nanobot/config.json` 配置 `channels.mochat`：
+1. 可选：让 nanobot 自动接入 Mochat
+- 你可以先在 agent 模式里发这段提示词（把邮箱替换成你的）：
+
+```text
+Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
+```
+
+- nanobot 会尝试自动注册并写入 `~/.nanobot/config.json`。
+
+2. 手动配置（推荐你确认一次配置）
+- 在 `~/.nanobot/config.json` 配置 `channels.mochat`：
 - `clawToken`：必填，作为 `X-Claw-Token` 访问 Mochat API
 - `sessions` / `panels`：可填具体 ID，或 `["*"]` 自动发现
 - `groups` + `mention.requireInGroups`：控制群聊是否必须 @ 才触发
 
-2. 启动网关：
+```json
+{
+  "channels": {
+    "mochat": {
+      "enabled": true,
+      "baseUrl": "https://mochat.io",
+      "socketUrl": "https://mochat.io",
+      "socketPath": "/socket.io",
+      "clawToken": "claw_xxx",
+      "agentUserId": "6982abcdef",
+      "sessions": ["*"],
+      "panels": ["*"],
+      "replyDelayMode": "non-mention",
+      "replyDelayMs": 120000
+    }
+  }
+}
+```
+
+3. 启动网关：
 
 ```bash
 cargo run -- gateway
 ```
 
-3. 发送消息测试
+4. 发送消息测试
 - 私聊会话：使用 `session_xxx` 目标
 - 群/面板会话：使用 panel/group 目标
 
@@ -272,6 +301,51 @@ cargo run --features qq-botrs -- gateway
 ```
 
 启动后，向机器人发送 QQ 单聊消息即可收到回复。
+
+## Slack 通道
+
+使用 Socket Mode，无需公网回调 URL。
+
+1. 创建 Slack App
+- 打开 [Slack API](https://api.slack.com/apps) -> Create New App -> From scratch
+- 选择工作区并创建应用
+
+2. 配置应用能力
+- Socket Mode：开启，并创建 App-Level Token（`connections:write`，形如 `xapp-...`）
+- OAuth & Permissions：添加 bot scopes：`chat:write`、`reactions:write`、`app_mentions:read`
+- Event Subscriptions：开启并订阅 `message.im`、`message.channels`、`app_mention`
+- App Home：开启 Messages Tab，并允许从 Messages Tab 发消息
+- Install App：安装到工作区，获取 Bot Token（`xoxb-...`）
+
+3. 配置 `~/.nanobot/config.json`
+
+```json
+{
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "mode": "socket",
+      "botToken": "xoxb-...",
+      "appToken": "xapp-...",
+      "groupPolicy": "mention",
+      "groupAllowFrom": [],
+      "dm": {
+        "enabled": true,
+        "policy": "open",
+        "allowFrom": []
+      }
+    }
+  }
+}
+```
+
+4. 启动网关
+
+```bash
+cargo run -- gateway
+```
+
+你可以在私聊中直接消息机器人，或在频道里 @ 机器人触发回复。
 
 ## WhatsApp 登录
 
