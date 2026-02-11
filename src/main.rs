@@ -7,7 +7,8 @@ use nanobot::channels::manager::ChannelManager;
 use nanobot::config::{Config, get_config_path, load_config, providers_status, save_config};
 use nanobot::cron::{CronSchedule, CronService};
 use nanobot::heartbeat::{DEFAULT_HEARTBEAT_INTERVAL_S, HeartbeatService};
-use nanobot::providers::openai::OpenAIProvider;
+use nanobot::providers::base::LLMProvider;
+use nanobot::providers::litellm::LiteLLMProvider;
 use nanobot::session::SessionManager;
 use nanobot::utils::{get_data_path, get_workspace_path};
 use std::fs;
@@ -274,24 +275,37 @@ fn cmd_status() -> Result<()> {
     Ok(())
 }
 
+fn build_provider(config: &Config, model: &str, api_key: String) -> Arc<dyn LLMProvider> {
+    let api_base = config.get_api_base(Some(model));
+    let extra_headers = config
+        .get_provider(Some(model))
+        .and_then(|p| p.extra_headers.clone());
+    let provider_name = config.get_provider_name(Some(model));
+    Arc::new(LiteLLMProvider::new(
+        api_key,
+        api_base,
+        model.to_string(),
+        extra_headers,
+        provider_name.as_deref(),
+    ))
+}
+
 async fn cmd_gateway(port: u16, _verbose: bool) -> Result<()> {
     let config = load_config(None).unwrap_or_default();
     let model = config.agents.defaults.model.clone();
-    let is_bedrock = model.starts_with("bedrock/");
+    let normalized_model = model.strip_prefix("litellm/").unwrap_or(&model);
+    let is_bedrock = normalized_model.starts_with("bedrock/");
     let api_key = config.get_api_key(Some(&model));
     if api_key.is_none() && !is_bedrock {
         return Err(anyhow!("No API key configured."));
     }
 
     let bus = Arc::new(MessageBus::new(1024));
-    let provider = Arc::new(OpenAIProvider::new(
+    let provider = build_provider(
+        &config,
+        &model,
         api_key.unwrap_or_else(|| "dummy".to_string()),
-        config.get_api_base(Some(&model)),
-        model.clone(),
-        config
-            .get_provider(Some(&model))
-            .and_then(|p| p.extra_headers.clone()),
-    ));
+    );
     let session_manager = Arc::new(SessionManager::new()?);
 
     let cron_store_path = get_data_path()?.join("cron").join("jobs.json");
@@ -402,7 +416,8 @@ async fn cmd_gateway(port: u16, _verbose: bool) -> Result<()> {
 async fn cmd_agent(message: Option<String>, session: &str) -> Result<()> {
     let config = load_config(None).unwrap_or_default();
     let model = config.agents.defaults.model.clone();
-    let is_bedrock = model.starts_with("bedrock/");
+    let normalized_model = model.strip_prefix("litellm/").unwrap_or(&model);
+    let is_bedrock = normalized_model.starts_with("bedrock/");
     let api_key = config.get_api_key(Some(&model));
     if api_key.is_none() && !is_bedrock {
         println!("Error: No API key configured.");
@@ -411,14 +426,11 @@ async fn cmd_agent(message: Option<String>, session: &str) -> Result<()> {
     }
 
     let bus = Arc::new(MessageBus::new(1024));
-    let provider = Arc::new(OpenAIProvider::new(
+    let provider = build_provider(
+        &config,
+        &model,
         api_key.unwrap_or_else(|| "dummy".to_string()),
-        config.get_api_base(Some(&model)),
-        model.clone(),
-        config
-            .get_provider(Some(&model))
-            .and_then(|p| p.extra_headers.clone()),
-    ));
+    );
     let session_manager = Arc::new(SessionManager::new()?);
     let cron_store_path = get_data_path()?.join("cron").join("jobs.json");
     let cron = Arc::new(CronService::new(cron_store_path));
@@ -861,7 +873,8 @@ async fn cmd_cron(command: CronCommand) -> Result<()> {
         CronCommand::Run { job_id, force } => {
             let config = load_config(None).unwrap_or_default();
             let model = config.agents.defaults.model.clone();
-            let is_bedrock = model.starts_with("bedrock/");
+            let normalized_model = model.strip_prefix("litellm/").unwrap_or(&model);
+            let is_bedrock = normalized_model.starts_with("bedrock/");
             let api_key = config.get_api_key(Some(&model));
             if api_key.is_none() && !is_bedrock {
                 return Err(anyhow!(
@@ -870,14 +883,11 @@ async fn cmd_cron(command: CronCommand) -> Result<()> {
             }
 
             let bus = Arc::new(MessageBus::new(1024));
-            let provider = Arc::new(OpenAIProvider::new(
+            let provider = build_provider(
+                &config,
+                &model,
                 api_key.unwrap_or_else(|| "dummy".to_string()),
-                config.get_api_base(Some(&model)),
-                model.clone(),
-                config
-                    .get_provider(Some(&model))
-                    .and_then(|p| p.extra_headers.clone()),
-            ));
+            );
             let session_manager = Arc::new(SessionManager::new()?);
             let channels = Arc::new(ChannelManager::new(
                 &config,

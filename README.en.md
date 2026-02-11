@@ -113,6 +113,18 @@ If your key is from MiniMax Mainland China (minimaxi.com), set:
 }
 ```
 
+`nanobot-rs` now follows the Python `nanobot` LiteLLM-style routing. You can set the model directly (no `litellm/` prefix required), for example:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-3-7-sonnet"
+    }
+  }
+}
+```
+
 If you use DingTalk, add this under `channels`:
 
 ```json

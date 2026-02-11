@@ -113,6 +113,18 @@ cargo run -- onboard
 }
 ```
 
+`nanobot-rs` 现在按 Python 版 `nanobot` 的 LiteLLM 路由方式工作。你可以直接填写模型（不再需要 `litellm/` 前缀），例如：
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-3-7-sonnet"
+    }
+  }
+}
+```
+
 如需使用钉钉，还可在 `channels` 中增加：
 
 ```json
