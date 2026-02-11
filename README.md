@@ -20,6 +20,7 @@ English: [README.en.md](README.en.md)
 - Agent 主循环：LLM 调用、工具调用、会话上下文、错误恢复
 - 配置系统：`~/.nanobot/config.json`，支持 provider 自动匹配
 - 会话与记忆：JSONL 会话持久化 + `memory/MEMORY.md`
+- 多模态输入：会将入站图片附件转换为 OpenAI 兼容的 `image_url` 内容片段
 - 工具系统：
   - `read_file` / `write_file` / `edit_file` / `list_dir`
   - `exec`

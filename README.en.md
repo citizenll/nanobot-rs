@@ -20,6 +20,7 @@
 - Agent loop: LLM calls, tool execution, session context, and error handling
 - Config system: `~/.nanobot/config.json` with provider auto-matching
 - Session and memory: JSONL session persistence + `memory/MEMORY.md`
+- Media-aware prompting: inbound image attachments are converted to OpenAI-compatible `image_url` content parts
 - Tooling:
   - `read_file` / `write_file` / `edit_file` / `list_dir`
   - `exec`
