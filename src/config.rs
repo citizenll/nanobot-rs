@@ -27,6 +27,7 @@ pub struct ProvidersConfig {
     pub vllm: ProviderConfig,
     pub gemini: ProviderConfig,
     pub moonshot: ProviderConfig,
+    pub minimax: ProviderConfig,
 }
 
 impl Default for ProvidersConfig {
@@ -43,6 +44,7 @@ impl Default for ProvidersConfig {
             vllm: ProviderConfig::default(),
             gemini: ProviderConfig::default(),
             moonshot: ProviderConfig::default(),
+            minimax: ProviderConfig::default(),
         }
     }
 }
@@ -431,13 +433,14 @@ impl Config {
         model: Option<&str>,
     ) -> (Option<&ProviderConfig>, Option<&'static str>) {
         let m = model.unwrap_or(&self.agents.defaults.model).to_lowercase();
-        let mapping: [(&str, &[&str]); 11] = [
+        let mapping: [(&str, &[&str]); 12] = [
             ("openrouter", &["openrouter"]),
             ("aihubmix", &["aihubmix"]),
             ("anthropic", &["anthropic", "claude"]),
             ("openai", &["openai", "gpt"]),
             ("deepseek", &["deepseek"]),
             ("gemini", &["gemini"]),
+            ("minimax", &["minimax"]),
             ("zhipu", &["zhipu", "glm", "zai"]),
             ("dashscope", &["qwen", "dashscope"]),
             ("moonshot", &["moonshot", "kimi"]),
@@ -459,6 +462,7 @@ impl Config {
             "openai",
             "deepseek",
             "gemini",
+            "minimax",
             "zhipu",
             "dashscope",
             "moonshot",
@@ -481,6 +485,7 @@ impl Config {
             "openai" => &self.providers.openai,
             "deepseek" => &self.providers.deepseek,
             "gemini" => &self.providers.gemini,
+            "minimax" => &self.providers.minimax,
             "zhipu" => &self.providers.zhipu,
             "dashscope" => &self.providers.dashscope,
             "moonshot" => &self.providers.moonshot,
@@ -528,6 +533,13 @@ impl Config {
                     .api_base
                     .clone()
                     .unwrap_or_else(|| "https://aihubmix.com/v1".to_string()),
+            ),
+            Some("minimax") => Some(
+                self.providers
+                    .minimax
+                    .api_base
+                    .clone()
+                    .unwrap_or_else(|| "https://api.minimax.io/v1".to_string()),
             ),
             _ => None,
         }
@@ -612,6 +624,10 @@ pub fn providers_status(config: &Config) -> Map<String, Value> {
     map.insert(
         "gemini".to_string(),
         Value::Bool(!config.providers.gemini.api_key.is_empty()),
+    );
+    map.insert(
+        "minimax".to_string(),
+        Value::Bool(!config.providers.minimax.api_key.is_empty()),
     );
     map.insert(
         "zhipu".to_string(),

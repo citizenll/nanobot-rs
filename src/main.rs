@@ -247,6 +247,18 @@ fn cmd_status() -> Result<()> {
         }
     );
     println!(
+        "MiniMax API: {}",
+        if status
+            .get("minimax")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            "SET"
+        } else {
+            "NOT SET"
+        }
+    );
+    println!(
         "vLLM/Local: {}",
         if status
             .get("vllm")
