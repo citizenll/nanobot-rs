@@ -233,6 +233,76 @@ cargo run -- agent -m "Hello"
 cargo run -- gateway
 ```
 
+## Windows Service (NSSM)
+
+`nanobot-rs` can run as a Windows background service via `nssm`, with built-in commands:
+
+- `service install`
+- `service remove`
+- `service start`
+- `service stop`
+- `service restart`
+- `service status`
+
+Build release first (with the features you need):
+
+```powershell
+cargo build --release --all-features
+```
+
+Install service (default service name: `NanobotService`, default args: `gateway`):
+
+```powershell
+.\target\release\nanobot.exe service install
+```
+
+Optional service name override:
+
+```powershell
+.\target\release\nanobot.exe service install --name NanobotService2
+```
+
+When `--name` is provided, the value is persisted to `service.name` in `~/.nanobot/config.json`, so later `start/stop/status` can omit `--name`.
+
+### Service Account Modes
+
+1. Use `LocalSystem`:
+
+```powershell
+.\target\release\nanobot.exe service install --system
+```
+
+2. Use current user (recommended, easier access to your user-scoped `~/.nanobot/config.json`):
+
+```powershell
+.\target\release\nanobot.exe service install --use-current-user --password "YourWindowsPassword"
+```
+
+Or use environment variable to avoid plaintext password in command history:
+
+```powershell
+$env:NANOBOT_SERVICE_PASSWORD="YourWindowsPassword"
+.\target\release\nanobot.exe service install --use-current-user
+Remove-Item Env:NANOBOT_SERVICE_PASSWORD
+```
+
+### Common Service Commands
+
+```powershell
+.\target\release\nanobot.exe service status
+.\target\release\nanobot.exe service start
+.\target\release\nanobot.exe service stop
+.\target\release\nanobot.exe service restart
+.\target\release\nanobot.exe service remove
+```
+
+### Notes
+
+- Use an elevated (Administrator) PowerShell for service install/start/stop/remove.
+- For `--use-current-user`, password must be the Windows account password (not PIN).
+- `Error 1069` usually means invalid service credentials or missing "Log on as a service" permission.
+- If you see "marked for deletion", close `services.msc` / Event Viewer, wait a few seconds, and retry. Reboot if needed.
+
 ## Common Commands
 
 ```bash

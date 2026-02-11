@@ -233,6 +233,76 @@ cargo run -- agent -m "Hello"
 cargo run -- gateway
 ```
 
+## Windows 服务（NSSM）
+
+`nanobot-rs` 支持通过 `nssm` 注册为 Windows 后台服务，并提供统一命令：
+
+- `service install`
+- `service remove`
+- `service start`
+- `service stop`
+- `service restart`
+- `service status`
+
+先构建 release（建议带上你需要的功能特性）：
+
+```powershell
+cargo build --release --all-features
+```
+
+安装服务（默认服务名：`NanobotService`，默认参数：`gateway`）：
+
+```powershell
+.\target\release\nanobot.exe service install
+```
+
+服务名可选覆盖：
+
+```powershell
+.\target\release\nanobot.exe service install --name NanobotService2
+```
+
+当你传入 `--name` 时，程序会把该名字写入 `~/.nanobot/config.json` 的 `service.name`，后续 `start/stop/status` 可直接省略 `--name`。
+
+### 服务账号模式
+
+1. 使用 `LocalSystem`（系统账号）：
+
+```powershell
+.\target\release\nanobot.exe service install --system
+```
+
+2. 使用当前用户（推荐，便于读取你用户目录下的 `~/.nanobot/config.json`）：
+
+```powershell
+.\target\release\nanobot.exe service install --use-current-user --password "你的Windows登录密码"
+```
+
+也可用环境变量避免命令行明文密码：
+
+```powershell
+$env:NANOBOT_SERVICE_PASSWORD="你的Windows登录密码"
+.\target\release\nanobot.exe service install --use-current-user
+Remove-Item Env:NANOBOT_SERVICE_PASSWORD
+```
+
+### 常用服务命令
+
+```powershell
+.\target\release\nanobot.exe service status
+.\target\release\nanobot.exe service start
+.\target\release\nanobot.exe service stop
+.\target\release\nanobot.exe service restart
+.\target\release\nanobot.exe service remove
+```
+
+### 注意事项
+
+- 请使用“管理员 PowerShell”执行服务安装/启停/删除。
+- `--use-current-user` 的密码是 Windows 登录密码，不是 PIN。
+- `Error 1069` 通常表示服务登录凭据错误或缺少“作为服务登录”权限。
+- 如果提示“服务已标记为删除”，请关闭 `services.msc` 等窗口后稍等重试；必要时重启系统。
+
 ## 常用命令
 
 ```bash

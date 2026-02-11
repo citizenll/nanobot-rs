@@ -6,6 +6,7 @@ pub mod cron;
 pub mod heartbeat;
 pub mod memory;
 pub mod providers;
+pub mod service;
 pub mod session;
 pub mod skills;
 pub mod tools;

@@ -135,6 +135,20 @@ impl Default for GatewayConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ServiceConfig {
+    pub name: String,
+}
+
+impl Default for ServiceConfig {
+    fn default() -> Self {
+        Self {
+            name: "NanobotService".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct TelegramConfig {
@@ -420,6 +434,7 @@ pub struct Config {
     pub channels: ChannelsConfig,
     pub providers: ProvidersConfig,
     pub gateway: GatewayConfig,
+    pub service: ServiceConfig,
     pub tools: ToolsConfig,
 }
 

@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow};
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use nanobot::VERSION;
 use nanobot::agent::AgentLoop;
 use nanobot::bus::{MessageBus, OutboundMessage};
@@ -9,6 +9,7 @@ use nanobot::cron::{CronSchedule, CronService};
 use nanobot::heartbeat::{DEFAULT_HEARTBEAT_INTERVAL_S, HeartbeatService};
 use nanobot::providers::base::LLMProvider;
 use nanobot::providers::litellm::LiteLLMProvider;
+use nanobot::service::{self, ServiceAccount, ServiceInstallOptions};
 use nanobot::session::SessionManager;
 use nanobot::utils::{get_data_path, get_workspace_path};
 use std::fs;
@@ -52,6 +53,10 @@ enum Commands {
     Cron {
         #[command(subcommand)]
         command: CronCommand,
+    },
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommand,
     },
 }
 
@@ -100,6 +105,50 @@ enum CronCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum ServiceCommand {
+    Install {
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        bin: Option<PathBuf>,
+        #[arg(long, default_value = "gateway")]
+        args: String,
+        #[arg(long)]
+        workdir: Option<PathBuf>,
+        #[arg(long, action = ArgAction::SetTrue)]
+        system: bool,
+        #[arg(long, action = ArgAction::SetTrue)]
+        use_current_user: bool,
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long, default_value_t = true, action = ArgAction::Set)]
+        auto_install_nssm: bool,
+        #[arg(long, default_value_t = true, action = ArgAction::Set)]
+        autostart: bool,
+    },
+    Remove {
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Start {
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Stop {
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Restart {
+        #[arg(long)]
+        name: Option<String>,
+    },
+    Status {
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -111,6 +160,7 @@ async fn main() -> Result<()> {
         Commands::Agent { message, session } => cmd_agent(message, &session).await?,
         Commands::Channels { command } => cmd_channels(command).await?,
         Commands::Cron { command } => cmd_cron(command).await?,
+        Commands::Service { command } => cmd_service(command)?,
     }
     Ok(())
 }
@@ -526,6 +576,176 @@ fn is_exit_command(command: &str) -> bool {
         command.to_ascii_lowercase().as_str(),
         "exit" | "quit" | "/exit" | "/quit" | ":q"
     )
+}
+
+fn resolve_service_name(config: &Config, name: Option<&str>) -> Result<String> {
+    let resolved = name
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            let configured = config.service.name.trim();
+            if configured.is_empty() {
+                None
+            } else {
+                Some(configured.to_string())
+            }
+        })
+        .unwrap_or_else(|| "NanobotService".to_string());
+
+    if resolved.is_empty() {
+        return Err(anyhow!("service name cannot be empty"));
+    }
+    Ok(resolved)
+}
+
+fn persist_service_name_if_overridden(config: &mut Config, name: Option<&str>) -> Result<()> {
+    if let Some(raw) = name {
+        let normalized = raw.trim();
+        if normalized.is_empty() {
+            return Err(anyhow!("service name cannot be empty"));
+        }
+        if config.service.name != normalized {
+            config.service.name = normalized.to_string();
+            save_config(config, None)?;
+            println!(
+                "Saved service name '{}' to {}",
+                normalized,
+                get_config_path()?.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn current_user_for_service() -> Result<String> {
+    let username = std::env::var("USERNAME")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| anyhow!("failed to detect current Windows username from USERNAME"))?;
+    let domain = std::env::var("USERDOMAIN").unwrap_or_default();
+    if domain.trim().is_empty() {
+        Ok(format!(".\\{username}"))
+    } else {
+        Ok(format!("{}\\{}", domain.trim(), username))
+    }
+}
+
+fn resolve_install_account(
+    use_system: bool,
+    use_current_user: bool,
+    password: Option<String>,
+) -> Result<ServiceAccount> {
+    if use_system && use_current_user {
+        return Err(anyhow!(
+            "--system and --use-current-user are mutually exclusive"
+        ));
+    }
+
+    if use_system {
+        return Ok(ServiceAccount::LocalSystem);
+    }
+
+    if use_current_user {
+        let resolved_password = password
+            .or_else(|| std::env::var("NANOBOT_SERVICE_PASSWORD").ok())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| {
+                anyhow!(
+                    "missing password: use --password or set NANOBOT_SERVICE_PASSWORD when --use-current-user is enabled"
+                )
+            })?;
+        let username = current_user_for_service()?;
+        return Ok(ServiceAccount::CurrentUser {
+            username,
+            password: resolved_password,
+        });
+    }
+
+    Ok(ServiceAccount::Inherit)
+}
+
+fn cmd_service(command: ServiceCommand) -> Result<()> {
+    let mut config = load_config(None).unwrap_or_default();
+    match command {
+        ServiceCommand::Install {
+            name,
+            bin,
+            args,
+            workdir,
+            system,
+            use_current_user,
+            password,
+            auto_install_nssm,
+            autostart,
+        } => {
+            let resolved_name = resolve_service_name(&config, name.as_deref())?;
+            persist_service_name_if_overridden(&mut config, name.as_deref())?;
+            let binary_path = match bin {
+                Some(path) => path,
+                None => std::env::current_exe()?,
+            };
+            let working_directory = match workdir {
+                Some(path) => path,
+                None => std::env::current_dir()?,
+            };
+            let account = resolve_install_account(system, use_current_user, password)?;
+            let options = ServiceInstallOptions {
+                name: resolved_name.clone(),
+                binary_path,
+                arguments: args,
+                working_directory,
+                log_directory: get_data_path()?.join("logs"),
+                account,
+                auto_install_nssm,
+                autostart,
+            };
+            service::install_service(&options)?;
+            println!("Service '{}' configured successfully.", resolved_name);
+            println!("Use `nanobot-rs service start` to start it.");
+        }
+        ServiceCommand::Remove { name } => {
+            let resolved_name = resolve_service_name(&config, name.as_deref())?;
+            persist_service_name_if_overridden(&mut config, name.as_deref())?;
+            service::remove_service(&resolved_name)?;
+            println!("Service '{}' removed.", resolved_name);
+        }
+        ServiceCommand::Start { name } => {
+            let resolved_name = resolve_service_name(&config, name.as_deref())?;
+            persist_service_name_if_overridden(&mut config, name.as_deref())?;
+            service::start_service(&resolved_name)?;
+            println!("Service '{}' started.", resolved_name);
+        }
+        ServiceCommand::Stop { name } => {
+            let resolved_name = resolve_service_name(&config, name.as_deref())?;
+            persist_service_name_if_overridden(&mut config, name.as_deref())?;
+            service::stop_service(&resolved_name)?;
+            println!("Service '{}' stopped.", resolved_name);
+        }
+        ServiceCommand::Restart { name } => {
+            let resolved_name = resolve_service_name(&config, name.as_deref())?;
+            persist_service_name_if_overridden(&mut config, name.as_deref())?;
+            service::restart_service(&resolved_name)?;
+            println!("Service '{}' restarted.", resolved_name);
+        }
+        ServiceCommand::Status { name } => {
+            let resolved_name = resolve_service_name(&config, name.as_deref())?;
+            persist_service_name_if_overridden(&mut config, name.as_deref())?;
+            let status = service::status_service(&resolved_name)?;
+            if !status.exists {
+                println!("Service '{}' is not installed.", resolved_name);
+            } else {
+                println!(
+                    "Service '{}' state: {}",
+                    resolved_name,
+                    status.state.unwrap_or_else(|| "UNKNOWN".to_string())
+                );
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn cmd_channels(command: ChannelCommand) -> Result<()> {
