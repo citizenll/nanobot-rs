@@ -1,5 +1,6 @@
 use crate::agent::context::ContextBuilder;
 use crate::agent::subagent::SubagentManager;
+use crate::agent::turn_guard::TurnGuard;
 use crate::bus::{InboundMessage, MessageBus, OutboundMessage};
 use crate::config::WebSearchConfig;
 use crate::cron::CronService;
@@ -62,44 +63,6 @@ impl AgentLoop {
         })
     }
 
-    fn correction_for_false_no_tools_claim(&self) -> Value {
-        json!({
-            "role": "system",
-            "content": format!(
-                "Correction: tools are available in this runtime. Available tools: {}. \
-        Do not claim tools are unavailable; call the appropriate tool directly.",
-                self.available_tools_text()
-            )
-        })
-    }
-
-    fn tools_available_response(&self) -> String {
-        let mut tool_names = self.tools.tool_names();
-        tool_names.sort();
-        if tool_names.is_empty() {
-            "当前运行时未注册任何工具。".to_string()
-        } else {
-            format!(
-                "当前运行时可用工具：\n- {}\n如需执行网络访问、命令执行、文件操作或定时任务，请直接给出目标。",
-                tool_names.join("\n- ")
-            )
-        }
-    }
-
-    fn is_tool_inventory_query(content: &str) -> bool {
-        let lower = content.to_ascii_lowercase();
-        let english_patterns = [
-            "available tools",
-            "tool list",
-            "tools list",
-            "what tools",
-            "tools json",
-        ];
-        let chinese_patterns = ["工具列表", "可用工具", "有哪些工具", "本轮工具"];
-        english_patterns.iter().any(|p| lower.contains(p))
-            || chinese_patterns.iter().any(|p| content.contains(p))
-    }
-
     fn build_turn_messages(
         &self,
         history: &[Value],
@@ -118,40 +81,6 @@ impl AgentLoop {
         );
         messages.insert(1, self.runtime_facts_message());
         messages
-    }
-
-    fn is_false_no_tools_claim(content: &str) -> bool {
-        let lower = content.to_ascii_lowercase();
-        let english_patterns = [
-            "tools json: []",
-            "tools json empty",
-            "tool list is empty",
-            "no available tools",
-            "no tools available",
-            "cannot call any tools",
-        ];
-        let chinese_patterns = [
-            "tools json为空",
-            "工具列表为空",
-            "没有可用工具",
-            "无法调用任何工具",
-        ];
-        english_patterns.iter().any(|p| lower.contains(p))
-            || chinese_patterns.iter().any(|p| content.contains(p))
-    }
-
-    fn should_retry_after_false_no_tools_claim(
-        &self,
-        content: Option<&str>,
-        iteration: u32,
-    ) -> bool {
-        if iteration >= self.max_iterations || self.tools.len() == 0 {
-            return false;
-        }
-        let Some(text) = content else {
-            return false;
-        };
-        Self::is_false_no_tools_claim(text)
     }
 
     pub fn new(
@@ -278,17 +207,6 @@ impl AgentLoop {
             cron_tool.set_context(msg.channel.clone(), msg.chat_id.clone());
         }
 
-        if Self::is_tool_inventory_query(&msg.content) {
-            let answer = self.tools_available_response();
-            session.add_message("user", &msg.content);
-            session.add_message("assistant", &answer);
-            self.sessions.save(&session)?;
-
-            let mut outbound = OutboundMessage::new(msg.channel, msg.chat_id, answer);
-            outbound.metadata = msg.metadata;
-            return Ok(outbound);
-        }
-
         let media = if msg.media.is_empty() {
             None
         } else {
@@ -301,6 +219,12 @@ impl AgentLoop {
 
         let mut final_content: Option<String> = None;
         let mut retried_with_fresh_context = false;
+        let turn_guard = TurnGuard::new(
+            self.provider.as_ref(),
+            &self.model,
+            self.available_tools_text(),
+            self.max_iterations,
+        );
         for iteration in 1..=self.max_iterations {
             let tool_defs = self.tools.get_definitions();
             let response = self
@@ -347,8 +271,9 @@ impl AgentLoop {
                     "content": "Reflect on the results and decide next steps."
                 }));
             } else {
-                if self
+                if turn_guard
                     .should_retry_after_false_no_tools_claim(response.content.as_deref(), iteration)
+                    .await
                 {
                     if !retried_with_fresh_context {
                         messages = self.build_turn_messages(
@@ -358,11 +283,11 @@ impl AgentLoop {
                             &msg.chat_id,
                             media,
                         );
-                        messages.push(self.correction_for_false_no_tools_claim());
+                        messages.push(turn_guard.correction_message());
                         retried_with_fresh_context = true;
                         continue;
                     }
-                    final_content = Some(self.tools_available_response());
+                    final_content = Some(turn_guard.tools_available_response());
                     break;
                 }
                 final_content = response.content;
@@ -412,6 +337,12 @@ impl AgentLoop {
 
         let mut final_content: Option<String> = None;
         let mut retried_with_fresh_context = false;
+        let turn_guard = TurnGuard::new(
+            self.provider.as_ref(),
+            &self.model,
+            self.available_tools_text(),
+            self.max_iterations,
+        );
         for iteration in 1..=self.max_iterations {
             let tool_defs = self.tools.get_definitions();
             let response = self
@@ -458,8 +389,9 @@ impl AgentLoop {
                     "content": "Reflect on the results and decide next steps."
                 }));
             } else {
-                if self
+                if turn_guard
                     .should_retry_after_false_no_tools_claim(response.content.as_deref(), iteration)
+                    .await
                 {
                     if !retried_with_fresh_context {
                         messages = self.build_turn_messages(
@@ -469,11 +401,11 @@ impl AgentLoop {
                             &origin_chat_id,
                             None,
                         );
-                        messages.push(self.correction_for_false_no_tools_claim());
+                        messages.push(turn_guard.correction_message());
                         retried_with_fresh_context = true;
                         continue;
                     }
-                    final_content = Some(self.tools_available_response());
+                    final_content = Some(turn_guard.tools_available_response());
                     break;
                 }
                 final_content = response.content;
