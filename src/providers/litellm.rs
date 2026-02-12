@@ -108,7 +108,7 @@ const PROVIDERS: &[ProviderSpec] = &[
         is_local: false,
         detect_by_key_prefix: "",
         detect_by_base_keyword: "",
-        default_api_base: "https://api.deepseek.com/v1",
+        default_api_base: "",
         strip_model_prefix: false,
         env_extras: &[],
         model_overrides: &[],
@@ -392,10 +392,7 @@ impl LiteLLMProvider {
         if self.gateway.is_some() || self.api_base.is_some() {
             return true;
         }
-        if matches!(find_by_model(model), Some(spec) if spec.name == "deepseek") {
-            return true;
-        }
-        !matches!(find_by_model(model), Some(spec) if spec.name == "anthropic")
+        matches!(find_by_model(model), Some(spec) if spec.name == "openai")
     }
 
     fn set_env_var(key: &str, value: &str, overwrite: bool) {
