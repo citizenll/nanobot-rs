@@ -37,6 +37,26 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
+    fn runtime_facts_message(&self) -> serde_json::Value {
+        let mut tool_names = self.tools.tool_names();
+        tool_names.sort();
+        let tools_text = if tool_names.is_empty() {
+            "(none)".to_string()
+        } else {
+            tool_names.join(", ")
+        };
+
+        json!({
+            "role": "system",
+            "content": format!(
+                "Runtime facts (authoritative): active model is '{model}'; available tools are: {tools}. \
+        If a user asks for external actions (network/file/command/scheduling), do not claim tools are unavailable; call the matching tool directly.",
+                model = self.model,
+                tools = tools_text
+            )
+        })
+    }
+
     pub fn new(
         bus: Arc<MessageBus>,
         provider: Arc<dyn LLMProvider>,
@@ -174,6 +194,7 @@ impl AgentLoop {
                 Some(msg.media.as_slice())
             },
         );
+        messages.insert(1, self.runtime_facts_message());
 
         let mut final_content: Option<String> = None;
         for _ in 0..self.max_iterations {
@@ -265,6 +286,7 @@ impl AgentLoop {
             Some(&origin_chat_id),
             None,
         );
+        messages.insert(1, self.runtime_facts_message());
 
         let mut final_content: Option<String> = None;
         for _ in 0..self.max_iterations {
