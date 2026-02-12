@@ -37,17 +37,47 @@ impl Session {
         self.updated_at = Local::now();
     }
 
+    fn to_llm_message(m: &Value) -> Value {
+        json!({
+            "role": m.get("role").and_then(Value::as_str).unwrap_or("user"),
+            "content": m.get("content").and_then(Value::as_str).unwrap_or(""),
+        })
+    }
+
     pub fn get_history(&self, max_messages: usize) -> Vec<Value> {
-        let start = self.messages.len().saturating_sub(max_messages);
-        self.messages[start..]
+        // Guard against model self-contamination:
+        // only replay user-side history back into context.
+        let user_messages = self
+            .messages
             .iter()
-            .map(|m| {
-                json!({
-                    "role": m.get("role").and_then(Value::as_str).unwrap_or("user"),
-                    "content": m.get("content").and_then(Value::as_str).unwrap_or(""),
-                })
-            })
+            .filter(|m| m.get("role").and_then(Value::as_str) == Some("user"))
+            .collect::<Vec<_>>();
+
+        let start = user_messages.len().saturating_sub(max_messages);
+        user_messages[start..]
+            .iter()
+            .map(|m| Self::to_llm_message(m))
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Session;
+
+    #[test]
+    fn history_excludes_assistant_messages() {
+        let mut session = Session::new("cli:test");
+        session.add_message("user", "u1");
+        session.add_message("assistant", "a1");
+        session.add_message("user", "u2");
+
+        let history = session.get_history(10);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0]["role"], "user");
+        assert_eq!(history[0]["content"], "u1");
+        assert_eq!(history[1]["role"], "user");
+        assert_eq!(history[1]["content"], "u2");
     }
 }
 

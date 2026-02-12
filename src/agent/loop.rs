@@ -14,7 +14,7 @@ use crate::tools::shell::ExecTool;
 use crate::tools::spawn::SpawnTool;
 use crate::tools::web::{WebFetchTool, WebSearchTool};
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,24 +37,121 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
-    fn runtime_facts_message(&self) -> serde_json::Value {
+    fn available_tools_text(&self) -> String {
         let mut tool_names = self.tools.tool_names();
         tool_names.sort();
-        let tools_text = if tool_names.is_empty() {
+        if tool_names.is_empty() {
             "(none)".to_string()
         } else {
             tool_names.join(", ")
-        };
+        }
+    }
+
+    fn runtime_facts_message(&self) -> serde_json::Value {
+        let tools_text = self.available_tools_text();
 
         json!({
             "role": "system",
             "content": format!(
                 "Runtime facts (authoritative): active model is '{model}'; available tools are: {tools}. \
-        If a user asks for external actions (network/file/command/scheduling), do not claim tools are unavailable; call the matching tool directly.",
+        If a user asks for external actions (network/file/command/scheduling), do not claim tools are unavailable; call the matching tool directly. \
+        Focus on the current user message only; do not summarize prior tasks unless explicitly requested.",
                 model = self.model,
                 tools = tools_text
             )
         })
+    }
+
+    fn correction_for_false_no_tools_claim(&self) -> Value {
+        json!({
+            "role": "system",
+            "content": format!(
+                "Correction: tools are available in this runtime. Available tools: {}. \
+        Do not claim tools are unavailable; call the appropriate tool directly.",
+                self.available_tools_text()
+            )
+        })
+    }
+
+    fn tools_available_response(&self) -> String {
+        let mut tool_names = self.tools.tool_names();
+        tool_names.sort();
+        if tool_names.is_empty() {
+            "当前运行时未注册任何工具。".to_string()
+        } else {
+            format!(
+                "当前运行时可用工具：\n- {}\n如需执行网络访问、命令执行、文件操作或定时任务，请直接给出目标。",
+                tool_names.join("\n- ")
+            )
+        }
+    }
+
+    fn is_tool_inventory_query(content: &str) -> bool {
+        let lower = content.to_ascii_lowercase();
+        let english_patterns = [
+            "available tools",
+            "tool list",
+            "tools list",
+            "what tools",
+            "tools json",
+        ];
+        let chinese_patterns = ["工具列表", "可用工具", "有哪些工具", "本轮工具"];
+        english_patterns.iter().any(|p| lower.contains(p))
+            || chinese_patterns.iter().any(|p| content.contains(p))
+    }
+
+    fn build_turn_messages(
+        &self,
+        history: &[Value],
+        current_message: &str,
+        channel: &str,
+        chat_id: &str,
+        media: Option<&[String]>,
+    ) -> Vec<Value> {
+        let mut messages = self.context.build_messages(
+            history,
+            current_message,
+            None,
+            Some(channel),
+            Some(chat_id),
+            media,
+        );
+        messages.insert(1, self.runtime_facts_message());
+        messages
+    }
+
+    fn is_false_no_tools_claim(content: &str) -> bool {
+        let lower = content.to_ascii_lowercase();
+        let english_patterns = [
+            "tools json: []",
+            "tools json empty",
+            "tool list is empty",
+            "no available tools",
+            "no tools available",
+            "cannot call any tools",
+        ];
+        let chinese_patterns = [
+            "tools json为空",
+            "工具列表为空",
+            "没有可用工具",
+            "无法调用任何工具",
+        ];
+        english_patterns.iter().any(|p| lower.contains(p))
+            || chinese_patterns.iter().any(|p| content.contains(p))
+    }
+
+    fn should_retry_after_false_no_tools_claim(
+        &self,
+        content: Option<&str>,
+        iteration: u32,
+    ) -> bool {
+        if iteration >= self.max_iterations || self.tools.len() == 0 {
+            return false;
+        }
+        let Some(text) = content else {
+            return false;
+        };
+        Self::is_false_no_tools_claim(text)
     }
 
     pub fn new(
@@ -181,23 +278,30 @@ impl AgentLoop {
             cron_tool.set_context(msg.channel.clone(), msg.chat_id.clone());
         }
 
-        let history = session.get_history(50);
-        let mut messages = self.context.build_messages(
-            &history,
-            &msg.content,
-            None,
-            Some(&msg.channel),
-            Some(&msg.chat_id),
-            if msg.media.is_empty() {
-                None
-            } else {
-                Some(msg.media.as_slice())
-            },
-        );
-        messages.insert(1, self.runtime_facts_message());
+        if Self::is_tool_inventory_query(&msg.content) {
+            let answer = self.tools_available_response();
+            session.add_message("user", &msg.content);
+            session.add_message("assistant", &answer);
+            self.sessions.save(&session)?;
+
+            let mut outbound = OutboundMessage::new(msg.channel, msg.chat_id, answer);
+            outbound.metadata = msg.metadata;
+            return Ok(outbound);
+        }
+
+        let media = if msg.media.is_empty() {
+            None
+        } else {
+            Some(msg.media.as_slice())
+        };
+        // Deterministic anti-contamination: only current turn is sent to the model.
+        let history = session.get_history(0);
+        let mut messages =
+            self.build_turn_messages(&history, &msg.content, &msg.channel, &msg.chat_id, media);
 
         let mut final_content: Option<String> = None;
-        for _ in 0..self.max_iterations {
+        let mut retried_with_fresh_context = false;
+        for iteration in 1..=self.max_iterations {
             let tool_defs = self.tools.get_definitions();
             let response = self
                 .provider
@@ -243,6 +347,24 @@ impl AgentLoop {
                     "content": "Reflect on the results and decide next steps."
                 }));
             } else {
+                if self
+                    .should_retry_after_false_no_tools_claim(response.content.as_deref(), iteration)
+                {
+                    if !retried_with_fresh_context {
+                        messages = self.build_turn_messages(
+                            &[],
+                            &msg.content,
+                            &msg.channel,
+                            &msg.chat_id,
+                            media,
+                        );
+                        messages.push(self.correction_for_false_no_tools_claim());
+                        retried_with_fresh_context = true;
+                        continue;
+                    }
+                    final_content = Some(self.tools_available_response());
+                    break;
+                }
                 final_content = response.content;
                 break;
             }
@@ -278,18 +400,19 @@ impl AgentLoop {
 
         let session_key = format!("{origin_channel}:{origin_chat_id}");
         let mut session = self.sessions.get_or_create(&session_key);
-        let mut messages = self.context.build_messages(
-            &session.get_history(50),
+        // Deterministic anti-contamination: only current turn is sent to the model.
+        let history = session.get_history(0);
+        let mut messages = self.build_turn_messages(
+            &history,
             &msg.content,
-            None,
-            Some(&origin_channel),
-            Some(&origin_chat_id),
+            &origin_channel,
+            &origin_chat_id,
             None,
         );
-        messages.insert(1, self.runtime_facts_message());
 
         let mut final_content: Option<String> = None;
-        for _ in 0..self.max_iterations {
+        let mut retried_with_fresh_context = false;
+        for iteration in 1..=self.max_iterations {
             let tool_defs = self.tools.get_definitions();
             let response = self
                 .provider
@@ -335,6 +458,24 @@ impl AgentLoop {
                     "content": "Reflect on the results and decide next steps."
                 }));
             } else {
+                if self
+                    .should_retry_after_false_no_tools_claim(response.content.as_deref(), iteration)
+                {
+                    if !retried_with_fresh_context {
+                        messages = self.build_turn_messages(
+                            &[],
+                            &msg.content,
+                            &origin_channel,
+                            &origin_chat_id,
+                            None,
+                        );
+                        messages.push(self.correction_for_false_no_tools_claim());
+                        retried_with_fresh_context = true;
+                        continue;
+                    }
+                    final_content = Some(self.tools_available_response());
+                    break;
+                }
                 final_content = response.content;
                 break;
             }
