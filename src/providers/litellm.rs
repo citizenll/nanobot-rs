@@ -1,4 +1,5 @@
 use crate::providers::base::{LLMProvider, LLMResponse, ToolCallRequest};
+use crate::providers::openai::OpenAIProvider as OpenAICompatProvider;
 use anyhow::Result;
 use async_trait::async_trait;
 use litellm_rs::core::types::content::ContentPart;
@@ -107,7 +108,7 @@ const PROVIDERS: &[ProviderSpec] = &[
         is_local: false,
         detect_by_key_prefix: "",
         detect_by_base_keyword: "",
-        default_api_base: "",
+        default_api_base: "https://api.deepseek.com/v1",
         strip_model_prefix: false,
         env_extras: &[],
         model_overrides: &[],
@@ -387,6 +388,16 @@ impl LiteLLMProvider {
         }
     }
 
+    fn use_openai_compat_path(&self, model: &str) -> bool {
+        if self.gateway.is_some() || self.api_base.is_some() {
+            return true;
+        }
+        if matches!(find_by_model(model), Some(spec) if spec.name == "deepseek") {
+            return true;
+        }
+        !matches!(find_by_model(model), Some(spec) if spec.name == "anthropic")
+    }
+
     fn set_env_var(key: &str, value: &str, overwrite: bool) {
         if key.is_empty() || value.is_empty() {
             return;
@@ -476,9 +487,27 @@ impl LLMProvider for LiteLLMProvider {
         temperature: f32,
     ) -> Result<LLMResponse> {
         let selected_model = model.unwrap_or(&self.default_model);
-        let resolved_model = self.resolve_model(selected_model);
         let mut effective_temperature = temperature;
+        let resolved_model = self.resolve_model(selected_model);
         self.apply_model_overrides(&resolved_model, &mut effective_temperature);
+
+        if self.use_openai_compat_path(selected_model) {
+            let provider = OpenAICompatProvider::new(
+                self.api_key.clone(),
+                self.effective_api_base(selected_model),
+                selected_model.to_string(),
+                Some(self.extra_headers.clone()),
+            );
+            return provider
+                .chat(
+                    messages,
+                    tools,
+                    Some(selected_model),
+                    max_tokens,
+                    effective_temperature,
+                )
+                .await;
+        }
 
         let chat_messages = messages
             .iter()
