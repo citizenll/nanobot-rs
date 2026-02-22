@@ -414,6 +414,30 @@ fn cmd_status() -> Result<()> {
         }
     );
     println!(
+        "SiliconFlow API: {}",
+        if status
+            .get("siliconflow")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            "SET"
+        } else {
+            "NOT SET"
+        }
+    );
+    println!(
+        "VolcEngine API: {}",
+        if status
+            .get("volcengine")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            "SET"
+        } else {
+            "NOT SET"
+        }
+    );
+    println!(
         "Anthropic API: {}",
         if status
             .get("anthropic")

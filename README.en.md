@@ -123,6 +123,26 @@ If your key is from MiniMax Mainland China (minimaxi.com), set:
 }
 ```
 
+For SiliconFlow / VolcEngine gateways, configure the matching provider and use the target model name directly:
+
+```json
+{
+  "providers": {
+    "siliconflow": {
+      "apiKey": "sk-xxx"
+    },
+    "volcengine": {
+      "apiKey": "ark-xxx"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "doubao-seed-1-6-thinking-250715"
+    }
+  }
+}
+```
+
 `nanobot-rs` now follows the Python `nanobot` LiteLLM-style routing. You can set the model directly (no `litellm/` prefix required), for example:
 
 ```json

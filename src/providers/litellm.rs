@@ -69,6 +69,36 @@ const PROVIDERS: &[ProviderSpec] = &[
         model_overrides: &[],
     },
     ProviderSpec {
+        name: "siliconflow",
+        keywords: &["siliconflow"],
+        env_key: "OPENAI_API_KEY",
+        litellm_prefix: "openai",
+        skip_prefixes: &[],
+        is_gateway: true,
+        is_local: false,
+        detect_by_key_prefix: "",
+        detect_by_base_keyword: "siliconflow",
+        default_api_base: "https://api.siliconflow.cn/v1",
+        strip_model_prefix: false,
+        env_extras: &[],
+        model_overrides: &[],
+    },
+    ProviderSpec {
+        name: "volcengine",
+        keywords: &["volcengine", "volces", "ark"],
+        env_key: "OPENAI_API_KEY",
+        litellm_prefix: "volcengine",
+        skip_prefixes: &[],
+        is_gateway: true,
+        is_local: false,
+        detect_by_key_prefix: "",
+        detect_by_base_keyword: "volces",
+        default_api_base: "https://ark.cn-beijing.volces.com/api/v3",
+        strip_model_prefix: false,
+        env_extras: &[],
+        model_overrides: &[],
+    },
+    ProviderSpec {
         name: "anthropic",
         keywords: &["anthropic", "claude"],
         env_key: "ANTHROPIC_API_KEY",
@@ -673,6 +703,18 @@ mod tests {
         assert_eq!(
             standard.resolve_model("dashscope/qwen-plus"),
             "dashscope/qwen-plus"
+        );
+
+        let volcengine = LiteLLMProvider::new(
+            "x",
+            Some("https://ark.cn-beijing.volces.com/api/v3".to_string()),
+            "doubao-seed-1-6-thinking-250715",
+            None,
+            Some("volcengine"),
+        );
+        assert_eq!(
+            volcengine.resolve_model("doubao-seed-1-6-thinking-250715"),
+            "volcengine/doubao-seed-1-6-thinking-250715"
         );
     }
 

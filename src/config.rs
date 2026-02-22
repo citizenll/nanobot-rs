@@ -20,6 +20,8 @@ pub struct ProvidersConfig {
     pub openai: ProviderConfig,
     pub openrouter: ProviderConfig,
     pub aihubmix: ProviderConfig,
+    pub siliconflow: ProviderConfig,
+    pub volcengine: ProviderConfig,
     pub deepseek: ProviderConfig,
     pub groq: ProviderConfig,
     pub zhipu: ProviderConfig,
@@ -37,6 +39,8 @@ impl Default for ProvidersConfig {
             openai: ProviderConfig::default(),
             openrouter: ProviderConfig::default(),
             aihubmix: ProviderConfig::default(),
+            siliconflow: ProviderConfig::default(),
+            volcengine: ProviderConfig::default(),
             deepseek: ProviderConfig::default(),
             groq: ProviderConfig::default(),
             zhipu: ProviderConfig::default(),
@@ -494,9 +498,11 @@ impl Config {
         model: Option<&str>,
     ) -> (Option<&ProviderConfig>, Option<&'static str>) {
         let m = model.unwrap_or(&self.agents.defaults.model).to_lowercase();
-        let mapping: [(&str, &[&str]); 12] = [
+        let mapping: [(&str, &[&str]); 14] = [
             ("openrouter", &["openrouter"]),
             ("aihubmix", &["aihubmix"]),
+            ("siliconflow", &["siliconflow"]),
+            ("volcengine", &["volcengine", "volces", "ark", "doubao"]),
             ("anthropic", &["anthropic", "claude"]),
             ("openai", &["openai", "gpt"]),
             ("deepseek", &["deepseek"]),
@@ -519,6 +525,8 @@ impl Config {
         for name in [
             "openrouter",
             "aihubmix",
+            "siliconflow",
+            "volcengine",
             "anthropic",
             "openai",
             "deepseek",
@@ -542,6 +550,8 @@ impl Config {
         match name {
             "openrouter" => &self.providers.openrouter,
             "aihubmix" => &self.providers.aihubmix,
+            "siliconflow" => &self.providers.siliconflow,
+            "volcengine" => &self.providers.volcengine,
             "anthropic" => &self.providers.anthropic,
             "openai" => &self.providers.openai,
             "deepseek" => &self.providers.deepseek,
@@ -594,6 +604,20 @@ impl Config {
                     .api_base
                     .clone()
                     .unwrap_or_else(|| "https://aihubmix.com/v1".to_string()),
+            ),
+            Some("siliconflow") => Some(
+                self.providers
+                    .siliconflow
+                    .api_base
+                    .clone()
+                    .unwrap_or_else(|| "https://api.siliconflow.cn/v1".to_string()),
+            ),
+            Some("volcengine") => Some(
+                self.providers
+                    .volcengine
+                    .api_base
+                    .clone()
+                    .unwrap_or_else(|| "https://ark.cn-beijing.volces.com/api/v3".to_string()),
             ),
             Some("minimax") => Some(
                 self.providers
@@ -669,6 +693,14 @@ pub fn providers_status(config: &Config) -> Map<String, Value> {
     map.insert(
         "aihubmix".to_string(),
         Value::Bool(!config.providers.aihubmix.api_key.is_empty()),
+    );
+    map.insert(
+        "siliconflow".to_string(),
+        Value::Bool(!config.providers.siliconflow.api_key.is_empty()),
+    );
+    map.insert(
+        "volcengine".to_string(),
+        Value::Bool(!config.providers.volcengine.api_key.is_empty()),
     );
     map.insert(
         "anthropic".to_string(),

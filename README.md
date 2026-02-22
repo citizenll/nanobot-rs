@@ -123,6 +123,26 @@ cargo run -- onboard
 }
 ```
 
+如需使用 SiliconFlow / VolcEngine 网关，可配置对应 provider，并直接使用目标模型名：
+
+```json
+{
+  "providers": {
+    "siliconflow": {
+      "apiKey": "sk-xxx"
+    },
+    "volcengine": {
+      "apiKey": "ark-xxx"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "doubao-seed-1-6-thinking-250715"
+    }
+  }
+}
+```
+
 `nanobot-rs` 现在按 Python 版 `nanobot` 的 LiteLLM 路由方式工作。你可以直接填写模型（不再需要 `litellm/` 前缀），例如：
 
 ```json
