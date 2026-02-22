@@ -18,6 +18,36 @@ fn normalize_path(path: &Path) -> PathBuf {
     out
 }
 
+fn canonicalize_or_normalize(path: &Path) -> Result<PathBuf> {
+    if path.exists() {
+        Ok(std::fs::canonicalize(path)?)
+    } else {
+        Ok(normalize_path(path))
+    }
+}
+
+fn canonicalize_for_guard(path: &Path) -> Result<PathBuf> {
+    if path.exists() {
+        return Ok(std::fs::canonicalize(path)?);
+    }
+
+    let mut ancestor = path;
+    while !ancestor.exists() {
+        ancestor = ancestor.parent().ok_or_else(|| {
+            anyhow!(
+                "Path {} has no existing ancestor to validate",
+                path.display()
+            )
+        })?;
+    }
+
+    let ancestor_real = std::fs::canonicalize(ancestor)?;
+    let suffix = path
+        .strip_prefix(ancestor)
+        .map_err(|_| anyhow!("Failed to validate path {}", path.display()))?;
+    Ok(normalize_path(&ancestor_real.join(suffix)))
+}
+
 fn resolve_path(path: &str, allowed_dir: Option<&PathBuf>) -> Result<PathBuf> {
     let input = PathBuf::from(path);
     let absolute = if input.is_absolute() {
@@ -28,8 +58,9 @@ fn resolve_path(path: &str, allowed_dir: Option<&PathBuf>) -> Result<PathBuf> {
     let resolved = normalize_path(&absolute);
 
     if let Some(allowed) = allowed_dir {
-        let allowed = normalize_path(allowed);
-        if !resolved.starts_with(&allowed) {
+        let allowed = canonicalize_or_normalize(&normalize_path(allowed))?;
+        let candidate = canonicalize_for_guard(&resolved)?;
+        if candidate.strip_prefix(&allowed).is_err() {
             return Err(anyhow!(
                 "Path {path} is outside allowed directory {}",
                 allowed.display()
@@ -53,6 +84,59 @@ pub struct ReadFileTool {
 impl ReadFileTool {
     pub fn new(allowed_dir: Option<PathBuf>) -> Self {
         Self { allowed_dir }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_path;
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    fn test_root() -> PathBuf {
+        std::env::temp_dir().join(format!("nanobot-rs-fs-{}", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn rejects_component_prefix_bypass() {
+        let root = test_root();
+        let allowed = root.join("workspace");
+        let evil = root.join("workspace_evil");
+        std::fs::create_dir_all(&allowed).expect("create allowed");
+        std::fs::create_dir_all(&evil).expect("create evil");
+
+        let evil_target = evil.join("note.txt");
+        let result = resolve_path(evil_target.to_str().expect("utf8 path"), Some(&allowed));
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rejects_symlink_escape_for_new_file() {
+        let root = test_root();
+        let allowed = root.join("workspace");
+        let outside = root.join("outside");
+        let link = allowed.join("link");
+        std::fs::create_dir_all(&allowed).expect("create allowed");
+        std::fs::create_dir_all(&outside).expect("create outside");
+
+        #[cfg(unix)]
+        let symlink_result = std::os::unix::fs::symlink(&outside, &link);
+        #[cfg(windows)]
+        let symlink_result = std::os::windows::fs::symlink_dir(&outside, &link);
+
+        if symlink_result.is_err() {
+            // Windows without developer mode/admin often cannot create symlinks.
+            let _ = std::fs::remove_dir_all(&root);
+            return;
+        }
+
+        let escaped_target = link.join("secret.txt");
+        let result = resolve_path(escaped_target.to_str().expect("utf8 path"), Some(&allowed));
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 

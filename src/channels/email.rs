@@ -11,7 +11,7 @@ use lettre::{Message, SmtpTransport, Transport};
 use mailparse::{DispositionType, MailAddr, MailHeaderMap, ParsedMail, addrparse, parse_mail};
 use regex::Regex;
 use serde_json::{Map, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,13 +28,46 @@ struct InboundEmail {
     uid: String,
 }
 
+#[derive(Default)]
+struct UidDedup {
+    order: VecDeque<String>,
+    seen: HashSet<String>,
+}
+
+impl UidDedup {
+    fn contains(&self, uid: &str) -> bool {
+        self.seen.contains(uid)
+    }
+
+    fn insert_with_limit(&mut self, uid: String, limit: usize) {
+        if !self.seen.insert(uid.clone()) {
+            return;
+        }
+        self.order.push_back(uid);
+
+        if self.seen.len() <= limit {
+            return;
+        }
+
+        // Keep newer UIDs; evict the oldest half to preserve recent dedupe.
+        let to_evict = self.seen.len() / 2;
+        for _ in 0..to_evict {
+            if let Some(old) = self.order.pop_front() {
+                self.seen.remove(&old);
+            } else {
+                break;
+            }
+        }
+    }
+}
+
 pub struct EmailChannel {
     config: EmailConfig,
     bus: Arc<MessageBus>,
     running: AtomicBool,
     last_subject_by_chat: Mutex<HashMap<String, String>>,
     last_message_id_by_chat: Mutex<HashMap<String, String>>,
-    processed_uids: Mutex<HashSet<String>>,
+    processed_uids: Mutex<UidDedup>,
 }
 
 impl EmailChannel {
@@ -45,7 +78,7 @@ impl EmailChannel {
             running: AtomicBool::new(false),
             last_subject_by_chat: Mutex::new(HashMap::new()),
             last_message_id_by_chat: Mutex::new(HashMap::new()),
-            processed_uids: Mutex::new(HashSet::new()),
+            processed_uids: Mutex::new(UidDedup::default()),
         }
     }
 
@@ -270,10 +303,7 @@ impl EmailChannel {
 
                     if dedupe && !uid.is_empty() {
                         let mut processed = self.processed_uids.lock().expect("poisoned mutex");
-                        processed.insert(uid.clone());
-                        if processed.len() > MAX_PROCESSED_UIDS {
-                            processed.clear();
-                        }
+                        processed.insert_with_limit(uid.clone(), MAX_PROCESSED_UIDS);
                     }
 
                     if mark_seen {
@@ -466,7 +496,7 @@ impl Channel for EmailChannel {
 
 #[cfg(test)]
 mod tests {
-    use super::EmailChannel;
+    use super::{EmailChannel, UidDedup};
     use crate::bus::MessageBus;
     use crate::config::EmailConfig;
     use std::sync::Arc;
@@ -515,5 +545,21 @@ mod tests {
     fn extract_sender_prefers_address() {
         let sender = EmailChannel::extract_sender("Alice <alice@example.com>");
         assert_eq!(sender, "alice@example.com");
+    }
+
+    #[test]
+    fn uid_dedup_evicts_oldest_half_instead_of_clearing_all() {
+        let mut dedup = UidDedup::default();
+        dedup.insert_with_limit("u1".to_string(), 4);
+        dedup.insert_with_limit("u2".to_string(), 4);
+        dedup.insert_with_limit("u3".to_string(), 4);
+        dedup.insert_with_limit("u4".to_string(), 4);
+        dedup.insert_with_limit("u5".to_string(), 4);
+
+        assert!(!dedup.contains("u1"));
+        assert!(!dedup.contains("u2"));
+        assert!(dedup.contains("u3"));
+        assert!(dedup.contains("u4"));
+        assert!(dedup.contains("u5"));
     }
 }
