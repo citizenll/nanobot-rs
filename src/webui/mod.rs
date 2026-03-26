@@ -50,8 +50,9 @@ impl ChatWorker {
             let is_bedrock = normalized_model.starts_with("bedrock/");
             let api_key = config.get_api_key(Some(&model));
             if api_key.is_none() && !is_bedrock {
-                let err = "No API key configured. Set providers.*.apiKey in ~/.nanobot/config.json."
-                    .to_string();
+                let err =
+                    "No API key configured. Set providers.*.apiKey in ~/.nanobot/config.json."
+                        .to_string();
                 while let Ok(req) = rx.recv() {
                     let _ = req.reply_tx.send(Err(anyhow::anyhow!(err.clone())));
                 }
@@ -83,9 +84,9 @@ impl ChatWorker {
                 Ok(m) => Arc::new(m),
                 Err(err) => {
                     while let Ok(req) = rx.recv() {
-                        let _ = req
-                            .reply_tx
-                            .send(Err(anyhow::anyhow!("failed to init session manager: {err}")));
+                        let _ = req.reply_tx.send(Err(anyhow::anyhow!(
+                            "failed to init session manager: {err}"
+                        )));
                     }
                     return;
                 }
@@ -100,6 +101,7 @@ impl ChatWorker {
                 config.tools.web.search.clone(),
                 config.tools.exec.timeout,
                 config.tools.restrict_to_workspace,
+                Some(config.agents.defaults.timezone.clone()),
                 None,
                 Some(session_manager),
             ) {
@@ -275,7 +277,9 @@ fn handle_request(mut req: Request, ctx: &WebUiContext) {
 
     match (method, url.as_str()) {
         (Method::Get, "/") => respond(req, 200, "text/html; charset=utf-8", INDEX_HTML.to_string()),
-        (Method::Get, "/app.css") => respond(req, 200, "text/css; charset=utf-8", APP_CSS.to_string()),
+        (Method::Get, "/app.css") => {
+            respond(req, 200, "text/css; charset=utf-8", APP_CSS.to_string())
+        }
         (Method::Get, "/app.js") => respond(
             req,
             200,

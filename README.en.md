@@ -88,11 +88,14 @@ Edit `~/.nanobot/config.json`:
   },
   "agents": {
     "defaults": {
-      "model": "gpt-4o-mini"
+      "model": "gpt-4o-mini",
+      "timezone": "Asia/Shanghai"
     }
   }
 }
 ```
+
+`agents.defaults.timezone` accepts an IANA timezone such as `Asia/Shanghai` or `America/Los_Angeles`. It keeps the system prompt clock, heartbeat prompt, and chat-side `cron` tool aligned when a cron expression omits `tz` or a one-shot ISO datetime omits an offset. The default is `UTC`.
 
 For MiniMax, add a `providers.minimax` section and use a model containing `minimax` (for example `minimax/MiniMax-M2.1`):
 
@@ -438,6 +441,8 @@ cargo run -- cron enable <job_id>
 cargo run -- cron run <job_id>
 cargo run -- cron remove <job_id>
 ```
+
+The chat-side `cron` tool inherits `agents.defaults.timezone` by default, so requests like "remind me tomorrow at 8am" use that timezone unless the user specifies another one.
 
 Interactive exit commands: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+C`/`Ctrl+D`.
 

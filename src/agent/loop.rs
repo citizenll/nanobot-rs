@@ -16,6 +16,7 @@ use crate::tools::sessions::{SessionsHistoryTool, SessionsListTool, SessionsSend
 use crate::tools::shell::ExecTool;
 use crate::tools::spawn::SpawnTool;
 use crate::tools::web::{WebFetchTool, WebSearchTool};
+use crate::utils::normalize_timezone_value;
 use anyhow::{Context, Result};
 use chrono::Local;
 use serde_json::{Value, json};
@@ -119,10 +120,12 @@ impl AgentLoop {
         web_search: WebSearchConfig,
         exec_timeout_s: u64,
         restrict_to_workspace: bool,
+        timezone: Option<String>,
         cron_service: Option<Arc<CronService>>,
         session_manager: Option<Arc<SessionManager>>,
     ) -> Result<Self> {
-        let context = ContextBuilder::new(workspace.clone())?;
+        let timezone = normalize_timezone_value(timezone.as_deref());
+        let context = ContextBuilder::new(workspace.clone(), timezone.clone())?;
         let sessions = session_manager.unwrap_or(Arc::new(SessionManager::new()?));
         let mut tools = ToolRegistry::new();
         let model_name = model.unwrap_or_else(|| provider.default_model().to_string());
@@ -168,7 +171,10 @@ impl AgentLoop {
         tools.register(spawn_tool.clone());
 
         let cron_tool = if let Some(cron_service) = cron_service {
-            let tool = Arc::new(CronTool::new(cron_service));
+            let tool = Arc::new(CronTool::new(
+                cron_service,
+                timezone.clone().unwrap_or_else(|| "UTC".to_string()),
+            ));
             tools.register(tool.clone());
             Some(tool)
         } else {

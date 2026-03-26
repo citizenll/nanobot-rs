@@ -88,11 +88,14 @@ cargo run -- onboard
   },
   "agents": {
     "defaults": {
-      "model": "gpt-4o-mini"
+      "model": "gpt-4o-mini",
+      "timezone": "Asia/Shanghai"
     }
   }
 }
 ```
+
+`agents.defaults.timezone` 使用 IANA 时区名，例如 `Asia/Shanghai`、`America/Los_Angeles`。它会统一影响系统提示中的当前时间、heartbeat 提示，以及聊天里 `cron` 工具对无 `tz` 的 cron 表达式和无时区 ISO 时间的解释；未配置时默认 `UTC`。
 
 如需使用 MiniMax，可在 `providers.minimax` 中配置密钥，并将模型设置为包含 `minimax` 的名称（例如 `minimax/MiniMax-M2.1`）：
 
@@ -438,6 +441,8 @@ cargo run -- cron enable <job_id>
 cargo run -- cron run <job_id>
 cargo run -- cron remove <job_id>
 ```
+
+聊天里的 `cron` 工具会默认继承 `agents.defaults.timezone`。像“明早 8 点提醒我”这类请求，如果没有显式给时区，就会按该配置解释。
 
 交互模式退出命令：`exit`、`quit`、`/exit`、`/quit`、`:q`，或 `Ctrl+C`/`Ctrl+D`。
 

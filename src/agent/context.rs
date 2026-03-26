@@ -1,22 +1,24 @@
 use crate::memory::MemoryStore;
 use crate::skills::SkillsLoader;
+use crate::utils::{current_time_str, normalize_timezone_value};
 use base64::Engine;
-use chrono::Local;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
 pub struct ContextBuilder {
     workspace: PathBuf,
+    timezone: Option<String>,
     memory: MemoryStore,
     skills: SkillsLoader,
 }
 
 impl ContextBuilder {
-    pub fn new(workspace: PathBuf) -> anyhow::Result<Self> {
+    pub fn new(workspace: PathBuf, timezone: Option<String>) -> anyhow::Result<Self> {
         let memory = MemoryStore::new(workspace.clone())?;
         let skills = SkillsLoader::new(workspace.clone(), None);
         Ok(Self {
             workspace,
+            timezone: normalize_timezone_value(timezone.as_deref()),
             memory,
             skills,
         })
@@ -25,19 +27,11 @@ impl ContextBuilder {
     pub fn build_system_prompt(&self, skill_names: Option<&[String]>) -> String {
         let mut parts = Vec::new();
 
-        let now = Local::now().format("%Y-%m-%d %H:%M (%A)").to_string();
-        let tz = {
-            let value = Local::now().format("%Z").to_string();
-            if value.trim().is_empty() {
-                "UTC".to_string()
-            } else {
-                value
-            }
-        };
+        let now = current_time_str(self.timezone.as_deref());
         let runtime = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
         let workspace = self.workspace.display().to_string();
         parts.push(format!(
-            "# nanobot-rs\n\nYou are nanobot, a helpful AI assistant.\n\n## Current Time\n{now} ({tz})\n\n## Runtime\n{runtime}\n\n## Workspace\n{workspace}\n- Long-term memory: {workspace}/memory/MEMORY.md\n- History log: {workspace}/memory/HISTORY.md (grep-searchable)\n\nIMPORTANT: Respond directly in text for normal chat.\nOnly use the 'message' tool for proactive channel messages.\nAlways be helpful, accurate, and concise. When using tools, think step by step: what you know, what you need, and why you chose this tool.\nWhen remembering something important, write to {workspace}/memory/MEMORY.md\nTo recall past events, grep {workspace}/memory/HISTORY.md"
+            "# nanobot-rs\n\nYou are nanobot, a helpful AI assistant.\n\n## Current Time\n{now}\n\n## Runtime\n{runtime}\n\n## Workspace\n{workspace}\n- Long-term memory: {workspace}/memory/MEMORY.md\n- History log: {workspace}/memory/HISTORY.md (grep-searchable)\n\nIMPORTANT: Respond directly in text for normal chat.\nOnly use the 'message' tool for proactive channel messages.\nAlways be helpful, accurate, and concise. When using tools, think step by step: what you know, what you need, and why you chose this tool.\nWhen remembering something important, write to {workspace}/memory/MEMORY.md\nTo recall past events, grep {workspace}/memory/HISTORY.md"
         ));
 
         let bootstrap_files = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"];
@@ -191,7 +185,7 @@ fn build_user_content(text: &str, media: Option<&[String]>) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::build_user_content;
+    use super::{ContextBuilder, build_user_content};
     use serde_json::Value;
     use uuid::Uuid;
 
@@ -214,5 +208,18 @@ mod tests {
         assert_eq!(parts[1]["type"], "text");
 
         let _ = std::fs::remove_file(temp);
+    }
+
+    #[test]
+    fn build_system_prompt_uses_configured_timezone() {
+        let workspace = std::env::temp_dir().join(format!("nanobot-rs-context-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace).expect("create workspace");
+
+        let builder = ContextBuilder::new(workspace.clone(), Some("Asia/Shanghai".to_string()))
+            .expect("builder");
+        let prompt = builder.build_system_prompt(None);
+        assert!(prompt.contains("Asia/Shanghai"));
+
+        let _ = std::fs::remove_dir_all(workspace);
     }
 }

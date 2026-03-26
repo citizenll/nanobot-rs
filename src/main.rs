@@ -13,6 +13,7 @@ use nanobot::providers::base::LLMProvider;
 use nanobot::providers::litellm::LiteLLMProvider;
 use nanobot::service::{self, ServiceAccount, ServiceInstallOptions};
 use nanobot::session::SessionManager;
+use nanobot::tools::cron::CronTool;
 use nanobot::utils::{get_data_path, get_workspace_path};
 use nanobot::webui::run_webui_server;
 use std::fs;
@@ -547,6 +548,7 @@ async fn cmd_gateway(port: u16, _verbose: bool) -> Result<()> {
         config.tools.web.search.clone(),
         config.tools.exec.timeout,
         config.tools.restrict_to_workspace,
+        Some(config.agents.defaults.timezone.clone()),
         Some(cron.clone()),
         Some(session_manager.clone()),
     )?);
@@ -557,14 +559,13 @@ async fn cmd_gateway(port: u16, _verbose: bool) -> Result<()> {
         let bus = bus_for_cron.clone();
         let agent = agent_for_cron.clone();
         Box::pin(async move {
-            let response = agent
-                .process_direct(
-                    &job.payload.message,
-                    Some(&format!("cron:{}", job.id)),
-                    job.payload.channel.as_deref(),
-                    job.payload.to.as_deref(),
-                )
-                .await?;
+            let response = CronTool::with_cron_execution_guard(agent.process_direct(
+                &job.payload.message,
+                Some(&format!("cron:{}", job.id)),
+                job.payload.channel.as_deref(),
+                job.payload.to.as_deref(),
+            ))
+            .await?;
 
             if job.payload.deliver {
                 if let (Some(channel), Some(to)) =
@@ -584,6 +585,7 @@ async fn cmd_gateway(port: u16, _verbose: bool) -> Result<()> {
         config.workspace_path(),
         DEFAULT_HEARTBEAT_INTERVAL_S,
         true,
+        Some(config.agents.defaults.timezone.clone()),
     ));
     let agent_for_heartbeat = agent.clone();
     heartbeat
@@ -665,6 +667,7 @@ async fn cmd_agent(message: Option<String>, session: &str) -> Result<()> {
         config.tools.web.search.clone(),
         config.tools.exec.timeout,
         config.tools.restrict_to_workspace,
+        Some(config.agents.defaults.timezone.clone()),
         Some(cron.clone()),
         Some(session_manager.clone()),
     )?);
@@ -677,14 +680,13 @@ async fn cmd_agent(message: Option<String>, session: &str) -> Result<()> {
         let agent = agent_for_cron.clone();
         let channels = channels_for_cron.clone();
         Box::pin(async move {
-            let response = agent
-                .process_direct(
-                    &job.payload.message,
-                    Some(&format!("cron:{}", job.id)),
-                    job.payload.channel.as_deref(),
-                    job.payload.to.as_deref(),
-                )
-                .await?;
+            let response = CronTool::with_cron_execution_guard(agent.process_direct(
+                &job.payload.message,
+                Some(&format!("cron:{}", job.id)),
+                job.payload.channel.as_deref(),
+                job.payload.to.as_deref(),
+            ))
+            .await?;
 
             if job.payload.deliver
                 && let (Some(channel), Some(to)) =
@@ -1381,6 +1383,7 @@ async fn cmd_cron(command: CronCommand) -> Result<()> {
                 config.tools.web.search.clone(),
                 config.tools.exec.timeout,
                 config.tools.restrict_to_workspace,
+                Some(config.agents.defaults.timezone.clone()),
                 Some(cron.clone()),
                 Some(session_manager),
             )?);
@@ -1393,14 +1396,13 @@ async fn cmd_cron(command: CronCommand) -> Result<()> {
                 let agent = agent_for_cron.clone();
                 let channels = channels_for_cron.clone();
                 Box::pin(async move {
-                    let response = agent
-                        .process_direct(
-                            &job.payload.message,
-                            Some(&format!("cron:{}", job.id)),
-                            job.payload.channel.as_deref(),
-                            job.payload.to.as_deref(),
-                        )
-                        .await?;
+                    let response = CronTool::with_cron_execution_guard(agent.process_direct(
+                        &job.payload.message,
+                        Some(&format!("cron:{}", job.id)),
+                        job.payload.channel.as_deref(),
+                        job.payload.to.as_deref(),
+                    ))
+                    .await?;
 
                     if job.payload.deliver
                         && let (Some(channel), Some(to)) =

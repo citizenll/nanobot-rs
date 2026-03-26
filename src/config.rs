@@ -58,6 +58,7 @@ impl Default for ProvidersConfig {
 pub struct AgentDefaults {
     pub workspace: String,
     pub model: String,
+    pub timezone: String,
     pub max_tokens: u32,
     pub temperature: f32,
     pub max_tool_iterations: u32,
@@ -69,6 +70,7 @@ impl Default for AgentDefaults {
         Self {
             workspace: "~/.nanobot/workspace".to_string(),
             model: "anthropic/claude-opus-4-5".to_string(),
+            timezone: "UTC".to_string(),
             max_tokens: 8192,
             temperature: 0.7,
             max_tool_iterations: 20,

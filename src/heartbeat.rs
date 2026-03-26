@@ -1,3 +1,4 @@
+use crate::utils::{current_time_str, normalize_timezone_value};
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -5,7 +6,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 pub const DEFAULT_HEARTBEAT_INTERVAL_S: u64 = 30 * 60;
-pub const HEARTBEAT_PROMPT: &str = "Read HEARTBEAT.md in your workspace (if it exists).\nFollow any instructions or tasks listed there.\nIf nothing needs attention, reply with just: HEARTBEAT_OK";
 pub const HEARTBEAT_OK_TOKEN: &str = "HEARTBEAT_OK";
 
 pub type HeartbeatCallback = Arc<dyn Fn(String) -> BoxFuture<'static, String> + Send + Sync>;
@@ -31,6 +31,7 @@ pub fn is_heartbeat_empty(content: Option<&str>) -> bool {
 
 pub struct HeartbeatService {
     workspace: std::path::PathBuf,
+    timezone: Option<String>,
     on_heartbeat: Arc<Mutex<Option<HeartbeatCallback>>>,
     interval_s: u64,
     enabled: bool,
@@ -39,9 +40,15 @@ pub struct HeartbeatService {
 }
 
 impl HeartbeatService {
-    pub fn new(workspace: std::path::PathBuf, interval_s: u64, enabled: bool) -> Self {
+    pub fn new(
+        workspace: std::path::PathBuf,
+        interval_s: u64,
+        enabled: bool,
+        timezone: Option<String>,
+    ) -> Self {
         Self {
             workspace,
+            timezone: normalize_timezone_value(timezone.as_deref()),
             on_heartbeat: Arc::new(Mutex::new(None)),
             interval_s,
             enabled,
@@ -59,6 +66,14 @@ impl HeartbeatService {
         self.workspace.join("HEARTBEAT.md")
     }
 
+    fn heartbeat_prompt(&self) -> String {
+        format!(
+            "Current Time: {}\nRead HEARTBEAT.md in your workspace (if it exists).\nFollow any instructions or tasks listed there.\nIf nothing needs attention, reply with just: {}",
+            current_time_str(self.timezone.as_deref()),
+            HEARTBEAT_OK_TOKEN
+        )
+    }
+
     pub async fn start(&self) {
         if !self.enabled {
             return;
@@ -68,6 +83,7 @@ impl HeartbeatService {
         let heartbeat_file = self.heartbeat_file();
         let on_heartbeat = self.on_heartbeat.clone();
         let interval_s = self.interval_s;
+        let timezone = self.timezone.clone();
 
         let handle = tokio::spawn(async move {
             while running.load(Ordering::Relaxed) {
@@ -83,7 +99,8 @@ impl HeartbeatService {
 
                 let callback = on_heartbeat.lock().await.clone();
                 if let Some(callback) = callback {
-                    let response = callback(HEARTBEAT_PROMPT.to_string()).await;
+                    let prompt = Self::build_prompt_for_task_local(timezone.as_deref());
+                    let response = callback(prompt).await;
                     let normalized = response.to_uppercase().replace('_', "");
                     let ok = HEARTBEAT_OK_TOKEN.to_uppercase().replace('_', "");
                     if normalized.contains(&ok) {
@@ -107,9 +124,17 @@ impl HeartbeatService {
     pub async fn trigger_now(&self) -> Option<String> {
         let callback = self.on_heartbeat.lock().await.clone();
         match callback {
-            Some(cb) => Some(cb(HEARTBEAT_PROMPT.to_string()).await),
+            Some(cb) => Some(cb(self.heartbeat_prompt()).await),
             None => None,
         }
+    }
+
+    fn build_prompt_for_task_local(timezone: Option<&str>) -> String {
+        format!(
+            "Current Time: {}\nRead HEARTBEAT.md in your workspace (if it exists).\nFollow any instructions or tasks listed there.\nIf nothing needs attention, reply with just: {}",
+            current_time_str(timezone),
+            HEARTBEAT_OK_TOKEN
+        )
     }
 }
 
@@ -126,7 +151,12 @@ mod tests {
 
     #[tokio::test]
     async fn trigger_now_invokes_callback() {
-        let service = HeartbeatService::new(std::path::PathBuf::from("."), 60, true);
+        let service = HeartbeatService::new(
+            std::path::PathBuf::from("."),
+            60,
+            true,
+            Some("Asia/Shanghai".to_string()),
+        );
         service
             .set_on_heartbeat(Arc::new(|prompt| {
                 Box::pin(async move { format!("received:{prompt}") })
@@ -137,5 +167,19 @@ mod tests {
         let text = result.unwrap_or_default();
         assert!(text.contains("received:"));
         assert!(text.contains("HEARTBEAT_OK"));
+        assert!(text.contains("Asia/Shanghai"));
+    }
+
+    #[test]
+    fn heartbeat_prompt_uses_configured_timezone() {
+        let service = HeartbeatService::new(
+            std::path::PathBuf::from("."),
+            60,
+            true,
+            Some("Asia/Shanghai".to_string()),
+        );
+        let prompt = service.heartbeat_prompt();
+        assert!(prompt.contains("Asia/Shanghai"));
+        assert!(prompt.contains("HEARTBEAT_OK"));
     }
 }

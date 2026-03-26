@@ -1,4 +1,5 @@
 use crate::cron::types::{CronJob, CronJobState, CronPayload, CronSchedule, CronStore};
+use crate::utils::parse_timezone;
 use anyhow::Result;
 use chrono::{TimeZone, Utc};
 use cron::Schedule;
@@ -31,8 +32,16 @@ fn compute_next_run(schedule: &CronSchedule, now_ms: i64) -> Option<i64> {
         "cron" => {
             let expr = schedule.expr.as_ref()?;
             let parsed = Schedule::from_str(expr).ok()?;
-            let now = Utc.timestamp_millis_opt(now_ms).single()?;
-            parsed.after(&now).next().map(|dt| dt.timestamp_millis())
+            if let Some(tz) = parse_timezone(schedule.tz.as_deref()) {
+                let now = Utc
+                    .timestamp_millis_opt(now_ms)
+                    .single()?
+                    .with_timezone(&tz);
+                parsed.after(&now).next().map(|dt| dt.timestamp_millis())
+            } else {
+                let now = Utc.timestamp_millis_opt(now_ms).single()?;
+                parsed.after(&now).next().map(|dt| dt.timestamp_millis())
+            }
         }
         _ => None,
     }
@@ -352,6 +361,25 @@ mod tests {
 
         assert_eq!(compute_next_run(&every, now), Some(now + 5_000));
         assert_eq!(compute_next_run(&at, now), None);
+    }
+
+    #[test]
+    fn compute_next_run_respects_schedule_timezone() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-03-25T23:30:00Z")
+            .expect("timestamp")
+            .timestamp_millis();
+        let schedule = CronSchedule {
+            kind: "cron".to_string(),
+            expr: Some("0 0 8 * * ?".to_string()),
+            tz: Some("Asia/Shanghai".to_string()),
+            ..Default::default()
+        };
+
+        let next_run = compute_next_run(&schedule, now).expect("next run");
+        let expected = chrono::DateTime::parse_from_rfc3339("2026-03-26T00:00:00Z")
+            .expect("expected timestamp")
+            .timestamp_millis();
+        assert_eq!(next_run, expected);
     }
 
     #[tokio::test]
